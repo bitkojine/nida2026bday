@@ -24,7 +24,7 @@ describe('compileFeedback', () => {
 
     expect(compiler.compile).toHaveBeenCalledWith('code');
     expect(setRules).toHaveBeenCalledTimes(1);
-    expect(setStatus).toHaveBeenCalledWith('OK (FALLBACK)');
+    expect(setStatus).toHaveBeenCalledWith('Paruošta (SUDERINAMAS REŽIMAS)');
   });
 
   it('shows compiler error status on failure', () => {
@@ -60,6 +60,6 @@ describe('compileFeedback', () => {
     expect(textarea.value).toBe('initial code');
     expect(compiler.compile).toHaveBeenCalledTimes(1);
     expect(compiler.compile).toHaveBeenCalledWith('initial code');
-    expect(setStatus).toHaveBeenCalledWith('OK (FALLBACK)');
+    expect(setStatus).toHaveBeenCalledWith('Paruošta (SUDERINAMAS REŽIMAS)');
   });
 });

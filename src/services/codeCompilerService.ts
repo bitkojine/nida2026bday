@@ -3,6 +3,7 @@ import { DEFAULT_RULES, type CompileResult, type DanceRules } from '../core/type
 import { ensureDotnetRuntime } from './wasmRuntimeLoader';
 
 function clampRules(rules: DanceRules): DanceRules {
+  const allowedWeather = new Set(['SAULETA', 'LIETINGA', 'SNIEGAS']);
   const colorPattern = /^#[0-9a-f]{6}$/i;
   const arklioSpalva = colorPattern.test(rules.arklioSpalva)
     ? rules.arklioSpalva
@@ -10,6 +11,9 @@ function clampRules(rules: DanceRules): DanceRules {
   const karciuSpalva = colorPattern.test(rules.karciuSpalva)
     ? rules.karciuSpalva
     : DEFAULT_RULES.karciuSpalva;
+  const oroEfektas = allowedWeather.has(rules.oroEfektas)
+    ? rules.oroEfektas
+    : DEFAULT_RULES.oroEfektas;
 
   return {
     tobulasLangas: Math.min(0.2, Math.max(0.01, rules.tobulasLangas)),
@@ -20,6 +24,7 @@ function clampRules(rules: DanceRules): DanceRules {
     arklioSpalva,
     karciuSpalva,
     suKepure: rules.suKepure,
+    oroEfektas,
   };
 }
 
@@ -109,6 +114,7 @@ export class CodeCompilerService {
       arklioSpalva: parseStringField(source, 'arklioSpalva') ?? DEFAULT_RULES.arklioSpalva,
       karciuSpalva: parseStringField(source, 'karciuSpalva') ?? DEFAULT_RULES.karciuSpalva,
       suKepure: parseBoolField(source, 'suKepure') ?? DEFAULT_RULES.suKepure,
+      oroEfektas: parseStringField(source, 'oroEfektas') ?? DEFAULT_RULES.oroEfektas,
     };
 
     const safe = clampRules(draft);
@@ -116,7 +122,7 @@ export class CodeCompilerService {
       return {
         success: false,
         rules: this.lastValidRules,
-        errors: ['Geras langas negali buti mazesnis uz tobula langa.'],
+        errors: ['Geras langas negali būti mažesnis už tobulą langą.'],
         mode: this.runtimeMode,
       };
     }

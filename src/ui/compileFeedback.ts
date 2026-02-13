@@ -16,8 +16,9 @@ export function applyCompileResult(
 ): void {
   const result = compiler.compile(source);
   if (result.success) {
+    const runtimeLabel = result.mode === 'fallback' ? 'SUDERINAMAS REŽIMAS' : '.NET WASM';
     sinks.setRules(result.rules);
-    sinks.setStatus(`OK (${result.mode.toUpperCase()})`);
+    sinks.setStatus(`Paruošta (${runtimeLabel})`);
     return;
   }
 

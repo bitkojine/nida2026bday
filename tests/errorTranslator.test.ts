@@ -3,7 +3,7 @@ import { translateCompilerError } from '../src/core/errorTranslator';
 
 describe('ErrorTranslator', () => {
   it('translates expected syntax errors', () => {
-    expect(translateCompilerError('expected ;')).toContain('truksta simbolio');
+    expect(translateCompilerError('expected ;')).toContain('trūksta simbolio');
   });
 
   it('translates identifier errors', () => {

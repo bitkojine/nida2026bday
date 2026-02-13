@@ -1,32 +1,35 @@
 export const CSHARP_TEMPLATE = `public class DanceRules : IDanceRules
 {
-    // === GALI KEISTI ZEMIAU ===
+    // === GALI KEISTI ŽEMIAU ===
 
-    // Laiko langas (sekundemis), kada paspaudimas laikomas TOBULU
+    // Laiko langas (sekundėmis), kada paspaudimas laikomas TOBULU
     public float tobulasLangas = 0.05f;
 
-    // Laiko langas (sekundemis), kada paspaudimas laikomas GERU
+    // Laiko langas (sekundėmis), kada paspaudimas laikomas GERU
     public float gerasLangas = 0.12f;
 
-    // Taskai uz TOBULA paspaudima
+    // Taškai už TOBULĄ paspaudimą
     public int tobuliTaskai = 100;
 
-    // Taskai uz GERA paspaudima
+    // Taškai už GERĄ paspaudimą
     public int geriTaskai = 50;
 
-    // Kiek paspaudimu is eiles reikia, kad isijungtu UZSIVEDIMAS
+    // Kiek paspaudimų iš eilės reikia, kad įsijungtų UŽSIVEDIMAS
     public int serijaIkiHype = 10;
 
-    // Arklio kuno spalva (HEX, pvz. #d6b48a)
+    // Arklio kūno spalva (HEX, pvz. #d6b48a)
     public string arklioSpalva = "#d6b48a";
 
-    // Arklio karciu ir koju spalva (HEX)
+    // Arklio karčių ir kojų spalva (HEX)
     public string karciuSpalva = "#7d4f2d";
 
-    // Uzdeti kepure ant arklio (true / false)
+    // Uždėti kepurę ant arklio (true / false)
     public bool suKepure = false;
 
-    // === GALI KEISTI AUKSCIAU ===
+    // Oras aplink arklį (SAULETA / LIETINGA / SNIEGAS)
+    public string oroEfektas = "SAULETA";
+
+    // === GALI KEISTI AUKŠČIAU ===
 
     public bool ArTobulas(float paklaida)
     {
