@@ -1,6 +1,13 @@
 import { calculateJudgement } from './timingCalculator';
 import type { DanceRules, Judgement } from './types';
 
+export type HitTiming = 'on-time' | 'early' | 'late' | 'none';
+
+export interface HitEvaluation {
+  judgement: Judgement;
+  timing: HitTiming;
+}
+
 interface Beat {
   id: number;
   timeSec: number;
@@ -42,7 +49,7 @@ export class RhythmEngine {
     }
   }
 
-  registerLaneHit(hitTimeSec: number, rules: DanceRules, lane: number): Judgement {
+  evaluateLaneHit(hitTimeSec: number, rules: DanceRules, lane: number): HitEvaluation {
     let target: Beat | null = null;
     let bestOffset = Number.POSITIVE_INFINITY;
 
@@ -63,15 +70,30 @@ export class RhythmEngine {
     }
 
     if (!target) {
-      return 'PRALEISTA';
+      return {
+        judgement: 'PRALEISTA',
+        timing: 'none',
+      };
     }
 
-    const judgement = calculateJudgement(hitTimeSec - target.timeSec, rules);
+    const offset = hitTimeSec - target.timeSec;
+    const judgement = calculateJudgement(offset, rules);
     if (judgement !== 'PRALEISTA') {
       target.matched = true;
+      return {
+        judgement,
+        timing: 'on-time',
+      };
     }
 
-    return judgement;
+    return {
+      judgement,
+      timing: offset < 0 ? 'early' : 'late',
+    };
+  }
+
+  registerLaneHit(hitTimeSec: number, rules: DanceRules, lane: number): Judgement {
+    return this.evaluateLaneHit(hitTimeSec, rules, lane).judgement;
   }
 
   registerHit(hitTimeSec: number, rules: DanceRules): Judgement {

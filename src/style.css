@@ -320,9 +320,26 @@ h1 {
   list-style: none;
   font-weight: 700;
   padding: 10px 12px;
+  padding-left: 34px;
   border-radius: 10px;
   border: 1px solid rgba(130, 93, 47, 0.2);
   background: #fff8eb;
+  position: relative;
+}
+
+.code-studio summary::before {
+  content: '▸';
+  position: absolute;
+  left: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 0.9rem;
+  color: #7d5d3d;
+  transition: transform 120ms ease;
+}
+
+.code-studio[open] summary::before {
+  transform: translateY(-50%) rotate(90deg);
 }
 
 .editor-panel {
@@ -354,6 +371,12 @@ h1 {
   background: #fffdf8;
   color: #2b2118;
   padding: 12px;
+  font-size: 15px;
+  line-height: 1.45;
+  caret-color: #9f5d00;
+  -webkit-user-select: text;
+  user-select: text;
+  touch-action: manipulation;
 }
 
 .hidden {
@@ -364,6 +387,13 @@ h1 {
   margin: 14px 0 0;
   text-align: center;
   font-size: 0.94rem;
+}
+
+.build-number {
+  margin: 6px 0 0;
+  text-align: center;
+  font-size: 0.74rem;
+  color: #7a674f;
 }
 
 @keyframes glow {

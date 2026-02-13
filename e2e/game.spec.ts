@@ -249,7 +249,7 @@ test.describe('Rhythm game flow', () => {
       .toMatchObject({ ok: true });
 
     const thirdState = await page.evaluate(() => window.__rhythmTest?.read());
-    expect(thirdState?.judgement).toBe('PRALEISTA');
+    expect(['PRALEISTA', 'PER VELAI']).toContain(thirdState?.judgement);
     expect(thirdState?.score).toBe(567);
     expect(thirdState?.streak).toBe(0);
 
@@ -262,6 +262,30 @@ test.describe('Rhythm game flow', () => {
     expect(rules?.arklioSpalva).toBe('#3366cc');
     expect(rules?.karciuSpalva).toBe('#ffcc00');
     expect(rules?.suKepure).toBe(true);
+  });
+
+  test('shows PER ANKSTI when press is way too early', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(false);
+      window.__rhythmTest?.resetScore();
+    });
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => {
+          const ok = window.__rhythmTest?.playNearestAny(-0.5) ?? false;
+          return {
+            ok,
+            state: window.__rhythmTest?.read(),
+          };
+        });
+      })
+      .toMatchObject({ ok: true });
+
+    await expect(page.locator('#judgement')).toHaveText('PER ANKSTI');
   });
 
   test('C# sandbox clamps and guards all editable values', async ({ page }) => {

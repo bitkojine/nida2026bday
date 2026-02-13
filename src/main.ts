@@ -4,13 +4,16 @@ import { GameStateManager } from './core/gameStateManager';
 import { normalizeLaneFromKey } from './core/inputController';
 import { buildLayoutMetrics } from './core/layoutManager';
 import { computeNoteYPercent } from './core/noteLayout';
+import type { HitEvaluation } from './core/rhythmEngine';
 import { RhythmEngine } from './core/rhythmEngine';
-import { DEFAULT_RULES, type DanceRules, type HorseMood } from './core/types';
+import { DEFAULT_RULES, type DanceRules, type HorseMood, type Judgement } from './core/types';
 import { HorseAnimator } from './render/horseAnimator';
 import { CodeCompilerService } from './services/codeCompilerService';
 import { CSHARP_TEMPLATE } from './services/csharpTemplate';
 import { applyCompileResult, wireFallbackCompiler } from './ui/compileFeedback';
 import { mountMonacoEditor } from './ui/monacoEditor';
+
+declare const __BUILD_VILNIUS_TIME__: string;
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
@@ -64,6 +67,7 @@ app.innerHTML = `
         </section>
       </details>
       <p class="dedication dedication-footer">${DEDICATION_TEXT} 🎉</p>
+      <p class="build-number">Build: ${__BUILD_VILNIUS_TIME__} (Vilnius)</p>
     </section>
   </main>
 `;
@@ -97,6 +101,30 @@ if (!ctxOrNull) {
 const ctx: CanvasRenderingContext2D = ctxOrNull;
 
 const horseAnimator = new HorseAnimator(ctx);
+
+function shouldUseSimpleEditor(): boolean {
+  const touchLike = window.matchMedia('(pointer: coarse)').matches;
+  const narrowScreen = window.innerWidth <= 900;
+  return touchLike || narrowScreen;
+}
+
+function mountSimpleEditor(): void {
+  editorHost.innerHTML =
+    '<textarea class="fallback-editor" id="fallbackCode" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off"></textarea>';
+  const fallback = document.querySelector<HTMLTextAreaElement>('#fallbackCode');
+  if (!fallback) {
+    return;
+  }
+
+  wireFallbackCompiler(fallback, CSHARP_TEMPLATE, compiler, {
+    setRules: (next) => {
+      rules = next;
+    },
+    setStatus: (next) => {
+      compileStatusEl.textContent = next;
+    },
+  });
+}
 
 function updateHud(score: number, streak: number, judgement: string): void {
   scoreEl.textContent = `${score}`;
@@ -138,9 +166,10 @@ function getMultiplier(streak: number): number {
 
 function showJudgementFeedback(
   judgement: 'TOBULA' | 'GERAI' | 'PRALEISTA',
+  displayText: string,
   lane: number | null,
 ): void {
-  judgementPopEl.textContent = judgement;
+  judgementPopEl.textContent = displayText;
   judgementPopEl.classList.remove('show', 'tobula', 'gerai', 'praleista');
   if (judgement === 'TOBULA') {
     judgementPopEl.classList.add('tobula');
@@ -186,10 +215,24 @@ resizeCanvas();
 window.addEventListener('resize', resizeCanvas, { passive: true });
 
 function applyHit(hitTimeSec: number, lane: number | null): void {
-  const judgement =
-    lane === null
-      ? engine.registerHit(hitTimeSec, rules)
-      : engine.registerLaneHit(hitTimeSec, rules, lane);
+  let judgement: Judgement = 'PRALEISTA';
+  let displayJudgement: string = 'PRALEISTA';
+
+  if (lane === null) {
+    judgement = engine.registerHit(hitTimeSec, rules);
+    displayJudgement = judgement;
+  } else {
+    const evaluation: HitEvaluation = engine.evaluateLaneHit(hitTimeSec, rules, lane);
+    judgement = evaluation.judgement;
+    if (evaluation.judgement === 'PRALEISTA' && evaluation.timing === 'early') {
+      displayJudgement = 'PER ANKSTI';
+    } else if (evaluation.judgement === 'PRALEISTA' && evaluation.timing === 'late') {
+      displayJudgement = 'PER VELAI';
+    } else {
+      displayJudgement = evaluation.judgement;
+    }
+  }
+
   const next = state.apply(judgement, rules);
 
   if (next.hypeActive) {
@@ -203,8 +246,8 @@ function applyHit(hitTimeSec: number, lane: number | null): void {
   }
 
   scoreEl.textContent = `${next.score}`;
-  updateHud(next.score, next.streak, mood === 'UZSIVEDIMAS' ? 'UZSIVEDIMAS' : judgement);
-  showJudgementFeedback(judgement, lane);
+  updateHud(next.score, next.streak, mood === 'UZSIVEDIMAS' ? 'UZSIVEDIMAS' : displayJudgement);
+  showJudgementFeedback(judgement, displayJudgement, lane);
 }
 
 function startLoop(): void {
@@ -227,7 +270,7 @@ function startLoop(): void {
       const next = state.apply('PRALEISTA', rules);
       mood = 'PRALEISTA';
       updateHud(next.score, next.streak, 'PRALEISTA');
-      showJudgementFeedback('PRALEISTA', null);
+      showJudgementFeedback('PRALEISTA', 'PRALEISTA', null);
     }
     renderLanes(now);
     horseAnimator.render(timeMs, mood, rules);
@@ -238,6 +281,11 @@ function startLoop(): void {
 }
 
 async function initEditor(): Promise<void> {
+  if (shouldUseSimpleEditor()) {
+    mountSimpleEditor();
+    return;
+  }
+
   try {
     const editor = await mountMonacoEditor(editorHost, CSHARP_TEMPLATE);
 
@@ -261,20 +309,7 @@ async function initEditor(): Promise<void> {
 
     runCompile();
   } catch {
-    editorHost.innerHTML = '<textarea class="fallback-editor" id="fallbackCode"></textarea>';
-    const fallback = document.querySelector<HTMLTextAreaElement>('#fallbackCode');
-    if (!fallback) {
-      return;
-    }
-
-    wireFallbackCompiler(fallback, CSHARP_TEMPLATE, compiler, {
-      setRules: (next) => {
-        rules = next;
-      },
-      setStatus: (next) => {
-        compileStatusEl.textContent = next;
-      },
-    });
+    mountSimpleEditor();
   }
 }
 
