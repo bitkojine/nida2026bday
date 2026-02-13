@@ -1,6 +1,7 @@
 import { defineConfig } from 'vite';
 
 export default defineConfig({
+  base: '/nida2026bday/',
   test: {
     environment: 'jsdom',
     exclude: ['e2e/**', 'node_modules/**', 'dist/**', 'coverage/**'],
