@@ -208,7 +208,9 @@ export class GameAudio {
 
   readDebugState(): AudioDebugState {
     return {
+      guideNotesRequested: this.debugState.guideNotesRequested,
       guideNotesPlayed: this.debugState.guideNotesPlayed,
+      backingNotesRequested: this.debugState.backingNotesRequested,
       backingNotesPlayed: this.debugState.backingNotesPlayed,
     };
   }

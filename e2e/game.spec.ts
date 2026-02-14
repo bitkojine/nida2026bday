@@ -130,6 +130,20 @@ test.describe('Rhythm game flow', () => {
     });
 
     expect(alpha).toBeGreaterThan(0);
+
+    const edgeAlpha = await page.locator('#horseCanvas').evaluate((node) => {
+      const canvas = node as HTMLCanvasElement;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        return 0;
+      }
+
+      const x = Math.max(0, canvas.width - 2);
+      const y = Math.max(0, canvas.height - 2);
+      return ctx.getImageData(x, y, 1, 1).data[3];
+    });
+
+    expect(edgeAlpha).toBeGreaterThan(0);
   });
 
   test('keeps game panel within viewport width', async ({ page }) => {

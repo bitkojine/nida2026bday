@@ -1,9 +1,14 @@
 import { translateCompilerError } from '../core/errorTranslator';
-import { DEFAULT_RULES, type CompileResult, type DanceRules } from '../core/types';
+import {
+  DEFAULT_RULES,
+  type CompileResult,
+  type DanceRules,
+  type HorseWeather,
+} from '../core/types';
 import { ensureDotnetRuntime } from './wasmRuntimeLoader';
 
 function clampRules(rules: DanceRules): DanceRules {
-  const allowedWeather = new Set(['SAULETA', 'LIETINGA', 'SNIEGAS']);
+  const allowedWeather = new Set<HorseWeather>(['SAULETA', 'LIETINGA', 'SNIEGAS']);
   const colorPattern = /^#[0-9a-f]{6}$/i;
   const arklioSpalva = colorPattern.test(rules.arklioSpalva)
     ? rules.arklioSpalva
@@ -26,6 +31,15 @@ function clampRules(rules: DanceRules): DanceRules {
     suKepure: rules.suKepure,
     oroEfektas,
   };
+}
+
+function parseWeatherField(source: string, field: keyof DanceRules): HorseWeather | null {
+  const value = parseStringField(source, field);
+  if (value === 'SAULETA' || value === 'LIETINGA' || value === 'SNIEGAS') {
+    return value;
+  }
+
+  return null;
 }
 
 function parseField(source: string, field: keyof DanceRules): number | null {
@@ -114,7 +128,7 @@ export class CodeCompilerService {
       arklioSpalva: parseStringField(source, 'arklioSpalva') ?? DEFAULT_RULES.arklioSpalva,
       karciuSpalva: parseStringField(source, 'karciuSpalva') ?? DEFAULT_RULES.karciuSpalva,
       suKepure: parseBoolField(source, 'suKepure') ?? DEFAULT_RULES.suKepure,
-      oroEfektas: parseStringField(source, 'oroEfektas') ?? DEFAULT_RULES.oroEfektas,
+      oroEfektas: parseWeatherField(source, 'oroEfektas') ?? DEFAULT_RULES.oroEfektas,
     };
 
     const safe = clampRules(draft);
