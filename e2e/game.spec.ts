@@ -14,7 +14,15 @@ async function updateDanceRulesCode(
   await expect(fallback).toBeVisible();
   const current = await fallback.inputValue();
   const next = mutate(current);
-  await fallback.fill(next);
+  await fallback.evaluate((node, value) => {
+    const textarea = node as HTMLTextAreaElement;
+    textarea.value = value;
+    textarea.dispatchEvent(new Event('input', { bubbles: true }));
+    textarea.dispatchEvent(new Event('change', { bubbles: true }));
+  }, next);
+  await expect
+    .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
+    .not.toBe('Kompiliuojama...');
 }
 
 function replaceRuleValue(source: string, field: string, valueLiteral: string): string {

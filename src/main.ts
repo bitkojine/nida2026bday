@@ -705,14 +705,19 @@ function releaseLanePress(releaseTimeSec: number, lane: number): void {
 }
 
 function startLoop(): void {
+  let prevNowSec: number | null = null;
+
   const tick = (timeMs: number): void => {
     if (disposed) {
       return;
     }
     const now = timeMs / 1000;
+    const frameDeltaSec =
+      prevNowSec === null ? 1 / 60 : Math.max(1 / 240, Math.min(0.5, now - prevNowSec));
+    prevNowSec = now;
     engine.update(now);
     if (autoplayEnabled) {
-      const autoWindowSec = Math.max(0.01, rules.tobulasLangas * 0.75);
+      const autoWindowSec = Math.max(0.02, rules.tobulasLangas * 0.75, frameDeltaSec * 1.35);
       const notesToPlay = engine.getBeatsInRange(now - autoWindowSec, now + autoWindowSec);
       for (const note of notesToPlay) {
         if (autoPlayedBeatIds.has(note.id)) {
@@ -726,8 +731,8 @@ function startLoop(): void {
       }
     }
 
-    const songLookBehindSec = 0.18;
-    const songLookAheadSec = 0.06;
+    const songLookBehindSec = Math.max(0.18, frameDeltaSec * 2.2);
+    const songLookAheadSec = Math.max(0.06, frameDeltaSec * 0.65);
     const songNotes = engine.getBeatsInRange(now - songLookBehindSec, now + songLookAheadSec, true);
     for (const note of songNotes) {
       if (songPlayedBeatIds.has(note.id)) {
