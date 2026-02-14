@@ -39,6 +39,7 @@ app.innerHTML = `
   <main class="layout">
     <section class="game" id="gameScreen">
       <h1>🎁 Šokanti Arklio Ritmo Dovana</h1>
+      <p class="dedication dedication-under-title dedication-footer">${DEDICATION_TEXT} 🎉</p>
       <header class="hud">
         <div><strong>Taškai</strong><span id="score">0</span></div>
         <div><strong>Serija</strong><span id="streak">0</span></div>
@@ -65,9 +66,6 @@ app.innerHTML = `
       <details class="code-studio">
         <summary>
           <span>C# studija: keisk žaidimo taisykles</span>
-          <span class="compile-status-wrap">
-            <span id="compileStatus">Kompiliuojama...</span>
-          </span>
         </summary>
         <section class="editor-panel">
           <div id="editor" class="editor"></div>
@@ -99,9 +97,10 @@ app.innerHTML = `
           </section>
         </section>
       </details>
-      <p class="dedication dedication-footer">${DEDICATION_TEXT} 🎉</p>
-      <p class="perf-stats" id="perfStats">Našumas: įkeliama...</p>
-      <p class="build-number">Versija: ${__BUILD_VILNIUS_TIME__} (Vilnius)</p>
+      <section class="perf-stack" aria-label="Našumo statistika">
+        <p class="build-number">Versija: ${__BUILD_VILNIUS_TIME__} (Lietuva)</p>
+        <p class="perf-stats" id="perfStats">Našumas: įkeliama...</p>
+      </section>
     </section>
   </main>
 `;
@@ -113,7 +112,6 @@ const multiplierEl = requiredElement<HTMLElement>('#multiplier');
 const judgementEl = requiredElement<HTMLElement>('#judgement');
 const judgementPopEl = requiredElement<HTMLElement>('#judgementPop');
 const autoplayToggleEl = requiredElement<HTMLButtonElement>('#autoplayToggle');
-const compileStatusEl = requiredElement<HTMLElement>('#compileStatus');
 const perfStatsEl = requiredElement<HTMLElement>('#perfStats');
 const puzzleProgressEl = requiredElement<HTMLElement>('#puzzleProgress');
 const puzzleStoryEl = requiredElement<HTMLElement>('#puzzleStory');
@@ -149,6 +147,9 @@ let lastVisualRenderMs = 0;
 let perfWindowStartMs = performance.now();
 let perfFrameCount = 0;
 let perfFrameMsTotal = 0;
+let perfLastMemorySampleMs = 0;
+let perfMemorySampleInFlight = false;
+let perfMemoryText = 'tikrinama...';
 let lastVisibleNoteCount = 0;
 let disposed = false;
 let autoplayEnabled = true;
@@ -337,9 +338,6 @@ function mountSimpleEditor(): void {
     setRules: (next) => {
       setRules(next);
     },
-    setStatus: (next) => {
-      compileStatusEl.textContent = next;
-    },
   });
 
   readEditorSource = (): string => fallback.value;
@@ -472,6 +470,49 @@ function readJsHeapMb(): number | null {
   return used / (1024 * 1024);
 }
 
+async function sampleMemoryText(): Promise<string> {
+  const heapMb = readJsHeapMb();
+  if (heapMb !== null) {
+    return `${heapMb.toFixed(1)}MB`;
+  }
+
+  const perf = performance as Performance & {
+    measureUserAgentSpecificMemory?: () => Promise<{ bytes: number }>;
+  };
+  if (typeof perf.measureUserAgentSpecificMemory === 'function') {
+    try {
+      const result = await perf.measureUserAgentSpecificMemory();
+      const mb = result.bytes / (1024 * 1024);
+      if (!Number.isNaN(mb) && Number.isFinite(mb)) {
+        return `${mb.toFixed(1)}MB`;
+      }
+    } catch {
+      // Ignore; we still provide a clear fallback label below.
+    }
+  }
+
+  return 'neprieinama (naršyklė nerodo)';
+}
+
+function queueMemorySample(nowMs: number): void {
+  if (perfMemorySampleInFlight) {
+    return;
+  }
+  if (nowMs - perfLastMemorySampleMs < 5000) {
+    return;
+  }
+
+  perfLastMemorySampleMs = nowMs;
+  perfMemorySampleInFlight = true;
+  void sampleMemoryText()
+    .then((next) => {
+      perfMemoryText = next;
+    })
+    .finally(() => {
+      perfMemorySampleInFlight = false;
+    });
+}
+
 function updatePerformanceStats(nowMs: number): void {
   perfFrameCount += 1;
   if (lastFrameTimeMs !== null) {
@@ -483,20 +524,24 @@ function updatePerformanceStats(nowMs: number): void {
   if (windowMs < 900) {
     return;
   }
+  queueMemorySample(nowMs);
 
   const fps = perfFrameCount / (windowMs / 1000);
   const avgFrameMs = perfFrameCount > 0 ? perfFrameMsTotal / perfFrameCount : 0;
-  const heapMb = readJsHeapMb();
   const audioStats = audio.readRuntimeStats();
   const horseStats = horseAnimator.getRuntimeStats();
-  const heapText = heapMb === null ? 'n/a' : `${heapMb.toFixed(1)}MB`;
   const visualCap = IS_COARSE_POINTER ? (autoplayEnabled ? 36 : 45) : 60;
 
-  perfStatsEl.textContent =
-    `Našumas: ${fps.toFixed(1)} FPS | ${avgFrameMs.toFixed(1)} ms ` +
-    `| Atmintis: ${heapText} | Natos: ${lastVisibleNoteCount} ` +
-    `| Dalelės: ${horseStats.noteParticles} | Garso balsai: ${audioStats.activeTransientVoices} ` +
-    `| Laikomos: ${audioStats.activeHoldVoices} | Vizualas: ${visualCap} FPS`;
+  perfStatsEl.textContent = [
+    `Našumas: ${fps.toFixed(1)} kadr./s`,
+    `Kadro laikas: ${avgFrameMs.toFixed(1)} ms`,
+    `Atmintis: ${perfMemoryText}`,
+    `Natos: ${lastVisibleNoteCount}`,
+    `Dalelės: ${horseStats.noteParticles}`,
+    `Garso balsai: ${audioStats.activeTransientVoices}`,
+    `Laikomos natos: ${audioStats.activeHoldVoices}`,
+    `Vizualo riba: ${visualCap} kadr./s`,
+  ].join('\n');
 
   perfWindowStartMs = nowMs;
   perfFrameCount = 0;
@@ -577,6 +622,8 @@ function showJudgementFeedback(
 }
 
 function resizeCanvas(): void {
+  const isLandscape = window.matchMedia('(orientation: landscape)').matches;
+  const isCoarseLandscape = IS_COARSE_POINTER && isLandscape;
   const cardStyle = window.getComputedStyle(gameScreen);
   const horizontalPadding =
     Number.parseFloat(cardStyle.paddingLeft) + Number.parseFloat(cardStyle.paddingRight);
@@ -584,7 +631,9 @@ function resizeCanvas(): void {
   const fallbackWidth = Math.floor(window.innerWidth - 24);
   const availableWidth = containerWidth > 0 ? containerWidth : fallbackWidth;
   const horseWidth = Math.max(220, availableWidth);
-  const horseHeight = Math.min(170, Math.max(120, Math.floor(window.innerHeight * 0.2)));
+  const horseHeight = isCoarseLandscape
+    ? Math.min(140, Math.max(92, Math.floor(window.innerHeight * 0.16)))
+    : Math.min(170, Math.max(120, Math.floor(window.innerHeight * 0.2)));
   const metrics = buildLayoutMetrics(horseWidth, horseHeight, window.devicePixelRatio || 1);
   canvas.style.width = `${metrics.width}px`;
   canvas.style.height = `${metrics.height}px`;
@@ -788,9 +837,6 @@ async function initEditor(): Promise<void> {
       applyCompileResult(editor.getValue(), compiler, {
         setRules: (next) => {
           setRules(next);
-        },
-        setStatus: (next) => {
-          compileStatusEl.textContent = next;
         },
       });
     };

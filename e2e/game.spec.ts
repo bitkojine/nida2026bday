@@ -22,8 +22,10 @@ async function updateDanceRulesCode(
     textarea.dispatchEvent(new Event('change', { bubbles: true }));
   }, next);
   await expect
-    .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
-    .not.toBe('Kompiliuojama...');
+    .poll(async () => {
+      return await page.evaluate(() => window.__rhythmTest?.getRules() ?? null);
+    })
+    .not.toBeNull();
 }
 
 function replaceRuleValue(source: string, field: string, valueLiteral: string): string {
@@ -73,12 +75,11 @@ test.describe('Rhythm game flow', () => {
     );
     await expect(page.locator('#autoplayToggle')).toHaveText('Žaisti automatiškai: TAIP');
 
-    const status = page.locator('#compileStatus');
     await expect
-      .poll(async () => (await status.textContent())?.trim() ?? '', {
-        message: 'Compile status should leave loading state',
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules() ?? null);
       })
-      .not.toBe('Kompiliuojama...');
+      .not.toBeNull();
   });
 
   test('template buttons load preset code and apply gameplay changes', async ({ page }) => {
@@ -116,11 +117,6 @@ test.describe('Rhythm game flow', () => {
     await expect(page.locator('#templateLockNote')).toBeHidden();
 
     await page.locator('.template-btn[data-template-id="uzsivedimo-raketa"]').click();
-
-    await expect
-      .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
-      .toContain('Paruošta');
-
     await expect
       .poll(async () => {
         return await page.evaluate(() => window.__rhythmTest?.readEditorSource() ?? '');
@@ -444,11 +440,43 @@ test.describe('Rhythm game flow', () => {
     expect(box.width).toBeLessThanOrEqual(viewport.width);
   });
 
+  test('fits iPhone landscape viewport without horizontal overflow', async ({
+    page,
+    browserName,
+  }) => {
+    test.skip(browserName !== 'webkit', 'Landscape iPhone behavior is validated on WebKit profile');
+    await page.setViewportSize({ width: 844, height: 390 });
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    const layout = await page.evaluate(() => {
+      const game = document.querySelector<HTMLElement>('#gameScreen');
+      if (!game) {
+        return { ok: false };
+      }
+
+      const rect = game.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const html = document.documentElement;
+      return {
+        ok: true,
+        viewportWidth,
+        gameWidth: rect.width,
+        hasOverflow: html.scrollWidth > viewportWidth + 1,
+      };
+    });
+
+    expect(layout.ok).toBe(true);
+    if (!layout.ok) {
+      return;
+    }
+    expect(layout.hasOverflow).toBe(false);
+    expect(layout.gameWidth).toBeLessThanOrEqual(layout.viewportWidth + 1);
+  });
+
   test('changing C# points changes real scoring speed', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
-    await expect(page.locator('#compileStatus')).not.toHaveText('Kompiliuojama...');
-
     const score = page.locator('#score');
     const baseStart = Number((await score.textContent()) ?? '0');
     await page.waitForTimeout(1800);
@@ -461,11 +489,6 @@ test.describe('Rhythm game flow', () => {
         .replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 420;')
         .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 50;'),
     );
-
-    await expect
-      .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
-      .toContain('Paruošta');
-
     const boostedStart = Number((await score.textContent()) ?? '0');
     await page.waitForTimeout(1800);
     const boostedEnd = Number((await score.textContent()) ?? '0');
@@ -484,11 +507,6 @@ test.describe('Rhythm game flow', () => {
         .replace('public float tobulasLangas = 0.05f;', 'public float tobulasLangas = 0.2f;')
         .replace('public float gerasLangas = 0.12f;', 'public float gerasLangas = 0.25f;'),
     );
-
-    await expect
-      .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
-      .toContain('Paruošta');
-
     await expect
       .poll(async () => (await page.locator('#judgement').textContent())?.trim() ?? '', {
         timeout: 5000,
@@ -508,11 +526,6 @@ test.describe('Rhythm game flow', () => {
     await updateDanceRulesCode(page, (source) =>
       replaceRuleValue(replaceRuleValue(source, 'tobulasLangas', '0.01f'), 'gerasLangas', '0.02f'),
     );
-
-    await expect
-      .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
-      .toContain('Paruošta');
-
     await playUpcomingTapWithOffset(page, 0.05);
 
     await expect(page.locator('#judgement')).toHaveText(/PRALEISTA|PER VELAI/);
@@ -520,11 +533,6 @@ test.describe('Rhythm game flow', () => {
     await updateDanceRulesCode(page, (source) =>
       replaceRuleValue(replaceRuleValue(source, 'tobulasLangas', '0.15f'), 'gerasLangas', '0.25f'),
     );
-
-    await expect
-      .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
-      .toContain('Paruošta');
-
     await playUpcomingTapWithOffset(page, 0.05);
 
     await expect(page.locator('#judgement')).toHaveText(/TOBULA|GERAI|UŽSIVEDĘS/);
@@ -552,10 +560,6 @@ test.describe('Rhythm game flow', () => {
         )
         .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "LIETINGA";');
     });
-
-    await expect
-      .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
-      .toContain('Paruošta');
   });
 
   test('changing visual C# fields updates rendered horse visual state', async ({ page }) => {
@@ -584,11 +588,6 @@ test.describe('Rhythm game flow', () => {
         '"LIETINGA"',
       ),
     );
-
-    await expect
-      .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
-      .toContain('Paruošta');
-
     await expect
       .poll(async () => {
         return await page.evaluate(() => window.__rhythmTest?.readVisualState() ?? null);
@@ -646,11 +645,6 @@ test.describe('Rhythm game flow', () => {
         '"SNIEGAS"',
       ),
     );
-
-    await expect
-      .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
-      .toContain('Paruošta');
-
     await page.evaluate(() => {
       window.__rhythmTest?.setAutoplay(false);
       window.__rhythmTest?.resetScore();
@@ -972,11 +966,6 @@ test.describe('Rhythm game flow', () => {
         )
         .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "AUDRA";'),
     );
-
-    await expect
-      .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
-      .toContain('Paruošta');
-
     const rules = await page.evaluate(() => window.__rhythmTest?.getRules());
     expect(rules?.tobulasLangas).toBe(0.01);
     expect(rules?.gerasLangas).toBe(0.4);
@@ -1004,11 +993,6 @@ test.describe('Rhythm game flow', () => {
         .replace('public int geriTaskai = 50;', 'public int geriTaskai = abc;')
         .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = -1;'),
     );
-
-    await expect
-      .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
-      .toContain('Paruošta');
-
     const rules = await page.evaluate(() => window.__rhythmTest?.getRules());
     // Negative/malformed numeric fields fall back to defaults in parser.
     expect(rules?.tobulasLangas).toBe(0.05);
@@ -1032,11 +1016,6 @@ test.describe('Rhythm game flow', () => {
         .replace('public int geriTaskai = 50;', 'public int geriTaskai = 4.4;')
         .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 49.6;'),
     );
-
-    await expect
-      .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
-      .toContain('Paruošta');
-
     const rules = await page.evaluate(() => window.__rhythmTest?.getRules());
     expect(rules?.tobuliTaskai).toBe(1000); // rounded then clamped max
     expect(rules?.geriTaskai).toBe(5); // rounded then clamped min
@@ -1057,11 +1036,6 @@ test.describe('Rhythm game flow', () => {
         .replace('public string kepuresTipas = "KLASIKINE";', 'public string kepuresTipas = "";')
         .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "??";'),
     );
-
-    await expect
-      .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
-      .toContain('Paruošta');
-
     const rules = await page.evaluate(() => window.__rhythmTest?.getRules());
     expect(rules?.arklioSpalva).toBe('#d6b48a'); // missing field -> default
     expect(rules?.karciuSpalva).toBe('#7d4f2d'); // invalid color -> default

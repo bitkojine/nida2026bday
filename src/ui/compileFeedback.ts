@@ -6,7 +6,6 @@ export interface CompileServiceLike {
 
 export interface CompileFeedbackSinks {
   setRules(next: DanceRules): void;
-  setStatus(next: string): void;
 }
 
 export function applyCompileResult(
@@ -16,13 +15,8 @@ export function applyCompileResult(
 ): void {
   const result = compiler.compile(source);
   if (result.success) {
-    const runtimeLabel = result.mode === 'fallback' ? 'SUDERINAMAS REŽIMAS' : '.NET WASM';
     sinks.setRules(result.rules);
-    sinks.setStatus(`Paruošta (${runtimeLabel})`);
-    return;
   }
-
-  sinks.setStatus(result.errors[0] ?? 'Klaida');
 }
 
 export function wireFallbackCompiler(

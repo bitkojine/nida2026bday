@@ -44,22 +44,14 @@ Atidaryk adresą iš terminalo (`vite` output), dažniausiai `http://127.0.0.1:5
    - `serijaIkiUzsivedimo`
    - `arklioSpalva`, `karciuSpalva`
    - `suKepure`, `kepuresTipas`, `oroEfektas`
-5. Stebėk kompiliavimo būseną:
-   - `Paruošta (.NET WASM)` arba
-   - `Paruošta (Suderinamas režimas)`
-
-## Ką reiškia kompiliavimo būsena
-
-- `Paruošta (.NET WASM)` reiškia, kad C# kodas veikia per `.NET WebAssembly` naršyklėje.
-- `Paruošta (Suderinamas režimas)` reiškia, kad pilnas `.NET` vykdymas nebuvo pasiekiamas, todėl naudojamas vietinis suderinamas taisyklių vertinimas.
-- Abiem atvejais žaidimas veikia ir tavo pakeitimai taikomi iš karto.
+5. Pakeitimai pritaikomi automatiškai po trumpos akimirkos.
 
 Jei matai klaidą po redagavimo:
 
 1. Patikrink, ar neužmiršai kabliataškio `;`.
 2. Patikrink, ar visi skliaustai `{ }` uždaryti poromis.
 3. Redaguok tik pažymėtą `GALI KEISTI` sritį.
-4. Po pakeitimo palauk trumpai (apie `0.1-0.2 s`), kol būsena vėl taps `Paruošta`.
+4. Po pakeitimo palauk trumpai (apie `0.1-0.2 s`), kol taisyklės persikompiliuos.
 
 ## Testai
 
@@ -115,7 +107,7 @@ Deploy modelis:
 - `src/core/` - deterministinė ritmo/scoring/timing logika
 - `src/services/` - C# compile/runtime/fallback sluoksnis
 - `src/render/` - arklio animatorius ir efektai
-- `src/ui/` - editorius, šablonai, misijos, compile UI
+- `src/ui/` - editorius, šablonai, misijos, redagavimo UX
 - `specs/` - spec-driven modulio kontraktai
 - `tests/` - Vitest testai
 - `e2e/` - Playwright scenarijai
