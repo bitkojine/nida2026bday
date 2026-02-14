@@ -854,6 +854,15 @@ h1 {
   font-size: var(--fs-medium);
 }
 
+.perf-stats {
+  margin: 6px 0 0;
+  text-align: center;
+  font-size: var(--fs-small);
+  line-height: 1.3;
+  color: #6d5b45;
+  overflow-wrap: anywhere;
+}
+
 .build-number {
   margin: 6px 0 0;
   text-align: center;

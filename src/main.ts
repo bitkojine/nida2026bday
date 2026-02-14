@@ -100,6 +100,7 @@ app.innerHTML = `
         </section>
       </details>
       <p class="dedication dedication-footer">${DEDICATION_TEXT} 🎉</p>
+      <p class="perf-stats" id="perfStats">Našumas: kraunama...</p>
       <p class="build-number">Versija: ${__BUILD_VILNIUS_TIME__} (Vilnius)</p>
     </section>
   </main>
@@ -113,6 +114,7 @@ const judgementEl = requiredElement<HTMLElement>('#judgement');
 const judgementPopEl = requiredElement<HTMLElement>('#judgementPop');
 const autoplayToggleEl = requiredElement<HTMLButtonElement>('#autoplayToggle');
 const compileStatusEl = requiredElement<HTMLElement>('#compileStatus');
+const perfStatsEl = requiredElement<HTMLElement>('#perfStats');
 const puzzleProgressEl = requiredElement<HTMLElement>('#puzzleProgress');
 const puzzleStoryEl = requiredElement<HTMLElement>('#puzzleStory');
 const puzzleGoalEl = requiredElement<HTMLElement>('#puzzleGoal');
@@ -135,12 +137,19 @@ const audio = new GameAudio(silentAudio);
 const HYPE_LABEL = 'UŽSIVEDĘS';
 const HUD_VALUE_MAX_FONT_PX = 14;
 const HUD_VALUE_MIN_FONT_PX = 9;
+const IS_COARSE_POINTER = window.matchMedia('(pointer: coarse)').matches;
 
 let rules: DanceRules = DEFAULT_RULES;
 let mood: HorseMood = 'GERAI';
 let compileTimer: number | null = null;
 let loopRafId: number | null = null;
 let audioRetryIntervalId: number | null = null;
+let lastFrameTimeMs: number | null = null;
+let lastVisualRenderMs = 0;
+let perfWindowStartMs = performance.now();
+let perfFrameCount = 0;
+let perfFrameMsTotal = 0;
+let lastVisibleNoteCount = 0;
 let disposed = false;
 let autoplayEnabled = true;
 let pendingEditorSource: string | null = null;
@@ -435,6 +444,7 @@ function renderLanes(nowSec: number): void {
       return `<div class="note note-lane-${note.lane}" style="top:${y}%; transform: translate(-50%, -50%) scale(${scale}); opacity:${opacity}"></div>`;
     })
     .join('');
+  lastVisibleNoteCount = notes.length;
 
   const activeHoldMarkup = Array.from(activeHolds.values())
     .map((hold) => {
@@ -448,6 +458,60 @@ function renderLanes(nowSec: number): void {
     .join('');
 
   laneHighwayEl.innerHTML = pendingMarkup + activeHoldMarkup;
+}
+
+function readJsHeapMb(): number | null {
+  const perf = performance as Performance & {
+    memory?: { usedJSHeapSize?: number };
+  };
+  const used = perf.memory?.usedJSHeapSize;
+  if (typeof used !== 'number' || Number.isNaN(used)) {
+    return null;
+  }
+
+  return used / (1024 * 1024);
+}
+
+function updatePerformanceStats(nowMs: number): void {
+  perfFrameCount += 1;
+  if (lastFrameTimeMs !== null) {
+    perfFrameMsTotal += Math.max(0, nowMs - lastFrameTimeMs);
+  }
+  lastFrameTimeMs = nowMs;
+
+  const windowMs = nowMs - perfWindowStartMs;
+  if (windowMs < 900) {
+    return;
+  }
+
+  const fps = perfFrameCount / (windowMs / 1000);
+  const avgFrameMs = perfFrameCount > 0 ? perfFrameMsTotal / perfFrameCount : 0;
+  const heapMb = readJsHeapMb();
+  const audioStats = audio.readRuntimeStats();
+  const horseStats = horseAnimator.getRuntimeStats();
+  const heapText = heapMb === null ? 'n/a' : `${heapMb.toFixed(1)}MB`;
+  const visualCap = IS_COARSE_POINTER ? (autoplayEnabled ? 36 : 45) : 60;
+
+  perfStatsEl.textContent =
+    `Našumas: ${fps.toFixed(1)} FPS | ${avgFrameMs.toFixed(1)} ms ` +
+    `| Atmintis: ${heapText} | Natos: ${lastVisibleNoteCount} ` +
+    `| Dalelės: ${horseStats.noteParticles} | Garso balsai: ${audioStats.activeTransientVoices} ` +
+    `| Laikomos: ${audioStats.activeHoldVoices} | Vizualas: ${visualCap} FPS`;
+
+  perfWindowStartMs = nowMs;
+  perfFrameCount = 0;
+  perfFrameMsTotal = 0;
+}
+
+function shouldRenderVisualFrame(timeMs: number): boolean {
+  const targetVisualFps = IS_COARSE_POINTER ? (autoplayEnabled ? 36 : 45) : 60;
+  const minFrameIntervalMs = 1000 / targetVisualFps;
+  if (timeMs - lastVisualRenderMs < minFrameIntervalMs) {
+    return false;
+  }
+
+  lastVisualRenderMs = timeMs;
+  return true;
 }
 
 function getMultiplier(streak: number): number {
@@ -578,7 +642,9 @@ function startLanePress(
   lane: number,
   source: 'manual' | 'autoplay' = 'manual',
 ): void {
-  audio.onPress(lane);
+  if (source === 'manual') {
+    audio.onPress(lane);
+  }
 
   const evaluation: HitEvaluation = engine.evaluateLaneHit(hitTimeSec, rules, lane);
   if (evaluation.judgement === 'PRALEISTA') {
@@ -692,9 +758,12 @@ function startLoop(): void {
     for (let i = 0; i < missed; i += 1) {
       applyJudgement('PRALEISTA', 'PRALEISTA', null);
     }
-    renderLanes(now);
-    const holdingLane = activeHolds.values().next().value?.lane ?? null;
-    horseAnimator.render(timeMs, mood, rules, activeHolds.size > 0, holdingLane);
+    if (shouldRenderVisualFrame(timeMs)) {
+      renderLanes(now);
+      const holdingLane = activeHolds.values().next().value?.lane ?? null;
+      horseAnimator.render(timeMs, mood, rules, activeHolds.size > 0, holdingLane);
+      updatePerformanceStats(timeMs);
+    }
     loopRafId = requestAnimationFrame(tick);
   };
 

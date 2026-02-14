@@ -102,6 +102,10 @@ export class HorseAnimator {
     return { ...this.lastVisualState };
   }
 
+  getRuntimeStats(): { noteParticles: number } {
+    return { noteParticles: this.noteParticles.length };
+  }
+
   emitPerfectNotes(lane: number | null): void {
     const nowSec = this.lastFrameSec ?? performance.now() / 1000;
     const sinceLast = nowSec - this.lastPerfectEmitSec;

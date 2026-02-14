@@ -14,6 +14,12 @@ interface AudioDebugState {
   backingNotesPlayed: number;
 }
 
+interface AudioRuntimeStats {
+  activeTransientVoices: number;
+  activeHoldVoices: number;
+  unlocked: boolean;
+}
+
 function laneFrequency(lane: number): number {
   return [164.81, 196.0, 220.0, 246.94][Math.max(0, Math.min(3, lane))] ?? 164.81;
 }
@@ -307,6 +313,14 @@ export class GameAudio {
       guideNotesPlayed: this.debugState.guideNotesPlayed,
       backingNotesRequested: this.debugState.backingNotesRequested,
       backingNotesPlayed: this.debugState.backingNotesPlayed,
+    };
+  }
+
+  readRuntimeStats(): AudioRuntimeStats {
+    return {
+      activeTransientVoices: this.activeTransientVoices,
+      activeHoldVoices: this.holds.size,
+      unlocked: this.unlocked,
     };
   }
 
