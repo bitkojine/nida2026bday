@@ -9,6 +9,7 @@ Pirminis taikinys: iPhone Safari. Taip pat veikia desktop naršyklėse.
 - C# studija žaidimo taisyklėms keisti realiu laiku
 - Mokymosi misijos (`0/5` -> `5/5`) su šablonų atrakinimo atlygiu
 - Šokantis arklys (`canvas`) su spalvų, kepurių ir oro efektų valdymu per C#
+- Gyvi našumo rodikliai poraštėje (`FPS`, `ms`, atmintis, garso balsai, dalelės)
 - Lietuviška UI ir dedikacija:
   - `Skirta Nidai – nuo Roberto. Su gimtadieniu! 🎉`
   - rodoma žaidimo apačioje visada
@@ -103,6 +104,12 @@ Deploy modelis:
 2. Statinis build (`dist/`) publikuojamas per GitHub Pages Actions.
 3. E2E workflow yra atskiras ir neužblokuoja deploy artefakto generavimo.
 
+## Home Screen (iPhone)
+
+- Pridėtas `site.webmanifest` ir iOS `apple-touch-icon`.
+- Home Screen pavadinimas: `Arklio Ritmas`.
+- Naudojama brandinta ikona iš `public/icons/`.
+
 ## Architektūra
 
 - `src/core/` - deterministinė ritmo/scoring/timing logika
@@ -118,6 +125,10 @@ Deploy modelis:
 - Touch-first UI, be hover priklausomybės
 - Safe-area palaikymas (`viewport-fit=cover`, `env(safe-area-inset-*)`)
 - iPhone fokusavimo zoom prevencija redaktoriuje (no-zoom viewport + mobile editor font sizing)
+- Adaptyvus vizualinis FPS mobiliuose:
+  - autoplay: ~36 FPS
+  - manual: ~45 FPS
+  - desktop: ~60 FPS
 - `requestAnimationFrame` renderis ir lengvos animacijos
 
 ## Pastabos apie C# runtime
