@@ -899,7 +899,7 @@ h1 {
 }
 
 .footer-info-title {
-  margin: 0 0 4px;
+  margin: 0;
   text-align: left;
   font-family: 'Space Grotesk', sans-serif;
   font-size: var(--fs-medium);
@@ -915,6 +915,28 @@ h1 {
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.6),
     0 1px 0 rgba(125, 90, 45, 0.12);
+  cursor: pointer;
+  list-style: none;
+}
+
+.footer-info-title::-webkit-details-marker {
+  display: none;
+}
+
+.footer-info-title::before {
+  content: '▸';
+  display: inline-block;
+  margin-right: 6px;
+  transform: translateY(-1px);
+  transition: transform 130ms ease;
+}
+
+.perf-stack[open] .footer-info-title::before {
+  transform: rotate(90deg) translateX(-1px);
+}
+
+.perf-stack-body {
+  margin-top: 6px;
 }
 
 .perf-stats {

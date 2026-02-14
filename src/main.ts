@@ -107,11 +107,13 @@ app.innerHTML = `
           </div>
         </section>
       </details>
-      <section class="perf-stack" aria-label="Našumo statistika">
-        <p class="footer-info-title">ℹ️ Papildoma informacija apie žaidimą</p>
-        <p class="build-number">Versija: ${__BUILD_VILNIUS_TIME__} (Lietuva)</p>
-        <p class="perf-stats" id="perfStats">Našumas: įkeliama...</p>
-      </section>
+      <details class="perf-stack" aria-label="Našumo statistika">
+        <summary class="footer-info-title">ℹ️ Papildoma informacija apie žaidimą</summary>
+        <div class="perf-stack-body">
+          <p class="build-number">Versija: ${__BUILD_VILNIUS_TIME__} (Lietuva)</p>
+          <p class="perf-stats" id="perfStats">Našumas: įkeliama...</p>
+        </div>
+      </details>
     </section>
   </main>
 `;
