@@ -470,8 +470,9 @@ test.describe('Rhythm game flow', () => {
     if (!layout.ok) {
       return;
     }
+    const viewportWidth = layout.viewportWidth ?? 0;
     expect(layout.hasOverflow).toBe(false);
-    expect(layout.gameWidth).toBeLessThanOrEqual(layout.viewportWidth + 1);
+    expect(layout.gameWidth).toBeLessThanOrEqual(viewportWidth + 1);
   });
 
   test('changing C# points changes real scoring speed', async ({ page }) => {
