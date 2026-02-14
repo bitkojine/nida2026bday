@@ -35,7 +35,7 @@ body {
 
 .layout {
   min-height: 100dvh;
-  padding: max(14px, env(safe-area-inset-top)) 10px max(14px, env(safe-area-inset-bottom));
+  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
 }
 
 .game {
@@ -552,7 +552,7 @@ h1 {
   position: absolute;
   inset: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 13px;
+  font-size: 16px;
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -711,5 +711,28 @@ h1 {
 
   .game {
     padding: 18px;
+  }
+
+  .fallback-lines,
+  .fallback-highlight,
+  .fallback-editor {
+    font-size: 13px;
+  }
+}
+
+@media (orientation: landscape) and (pointer: coarse) {
+  .layout {
+    padding-left: env(safe-area-inset-left);
+    padding-right: env(safe-area-inset-right);
+  }
+
+  .game {
+    max-width: none;
+    min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
   }
 }

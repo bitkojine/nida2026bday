@@ -63,4 +63,24 @@ describe('RhythmEngine', () => {
     expect(evaluation.noteType).toBe('hold');
     expect(evaluation.holdEndSec).toBeGreaterThan(hold.timeSec);
   });
+
+  it('can include matched beats for song scheduling when requested', () => {
+    const engine = new RhythmEngine(120, 0, [0]);
+    engine.update(0.1);
+
+    const beat = engine.getBeatsInRange(-0.1, 1)[0];
+    expect(beat).toBeDefined();
+    if (!beat) {
+      return;
+    }
+
+    const evalResult = engine.evaluateLaneHit(beat.timeSec, DEFAULT_RULES, beat.lane);
+    expect(evalResult.judgement).toBe('TOBULA');
+
+    const unmatched = engine.getBeatsInRange(-0.1, 1);
+    expect(unmatched.some((candidate) => candidate.id === beat.id)).toBe(false);
+
+    const withMatched = engine.getBeatsInRange(-0.1, 1, true);
+    expect(withMatched.some((candidate) => candidate.id === beat.id)).toBe(true);
+  });
 });

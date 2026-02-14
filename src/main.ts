@@ -548,7 +548,7 @@ function startLoop(): void {
 
     const songLookBehindSec = 0.18;
     const songLookAheadSec = 0.06;
-    const songNotes = engine.getBeatsInRange(now - songLookBehindSec, now + songLookAheadSec);
+    const songNotes = engine.getBeatsInRange(now - songLookBehindSec, now + songLookAheadSec, true);
     for (const note of songNotes) {
       if (songPlayedBeatIds.has(note.id)) {
         continue;
@@ -775,6 +775,8 @@ declare global {
       playNearestAny(offsetSec: number): boolean;
       playNearestTapAny(offsetSec: number): boolean;
       playLaneAt(lane: number, atSec: number): boolean;
+      peekUpcomingTapAny(minAheadSec: number): { id: number; timeSec: number; lane: number } | null;
+      wasSongBeatPlayed(beatId: number): boolean;
       peekNearestLane(lane: number): { id: number; timeSec: number; lane: number } | null;
       peekNearestAny(): { id: number; timeSec: number; lane: number } | null;
       peekNearestHold(lane: number): {
@@ -872,6 +874,17 @@ window.__rhythmTest = {
   playLaneAt(lane: number, atSec: number): boolean {
     startLanePress(atSec, lane);
     return true;
+  },
+  peekUpcomingTapAny(minAheadSec: number): { id: number; timeSec: number; lane: number } | null {
+    const now = performance.now() / 1000;
+    engine.update(now);
+    const note = engine
+      .getBeatsInRange(now + Math.max(0, minAheadSec), 6)
+      .find((candidate) => candidate.holdDurationSec === 0);
+    return note ? { id: note.id, timeSec: note.timeSec, lane: note.lane } : null;
+  },
+  wasSongBeatPlayed(beatId: number): boolean {
+    return songPlayedBeatIds.has(beatId);
   },
   peekNearestLane(lane: number): { id: number; timeSec: number; lane: number } | null {
     const now = performance.now() / 1000;

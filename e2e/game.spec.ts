@@ -477,6 +477,44 @@ test.describe('Rhythm game flow', () => {
     await expect(page.locator('#score')).toHaveText('0');
   });
 
+  test('early but valid hit still keeps background song playback for that beat', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(false);
+      window.__rhythmTest?.resetScore();
+    });
+
+    const target = await page.evaluate(() => window.__rhythmTest?.peekUpcomingTapAny(0.6));
+    expect(target).not.toBeNull();
+    if (!target) {
+      return;
+    }
+
+    const hitOk = await page.evaluate(
+      ({ lane, timeSec }) => {
+        return window.__rhythmTest?.playLaneAt(lane, timeSec - 0.02) ?? false;
+      },
+      { lane: target.lane, timeSec: target.timeSec },
+    );
+    expect(hitOk).toBe(true);
+    await expect(page.locator('#judgement')).toHaveText(/TOBULA|GERAI|UŽSIVEDĘS/);
+
+    await expect
+      .poll(
+        async () =>
+          await page.evaluate(
+            (beatId) => window.__rhythmTest?.wasSongBeatPlayed(beatId) ?? false,
+            target.id,
+          ),
+        { timeout: 5000 },
+      )
+      .toBe(true);
+  });
+
   test('hold note gives score only after full hold is played', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();

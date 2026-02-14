@@ -195,9 +195,13 @@ export class RhythmEngine {
   getBeatsInRange(
     startSec: number,
     endSec: number,
+    includeMatched = false,
   ): Array<{ id: number; timeSec: number; lane: number; holdDurationSec: number; toneHz: number }> {
     return this.beats
-      .filter((beat) => !beat.matched && beat.timeSec >= startSec && beat.timeSec <= endSec)
+      .filter(
+        (beat) =>
+          (includeMatched || !beat.matched) && beat.timeSec >= startSec && beat.timeSec <= endSec,
+      )
       .map((beat) => ({
         id: beat.id,
         timeSec: beat.timeSec,
