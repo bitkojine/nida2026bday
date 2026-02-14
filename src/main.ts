@@ -377,8 +377,19 @@ function mountSimpleEditor(): void {
     return Math.max(1, Math.floor(availableWidth / avgCharWidth));
   };
 
+  let scrollSyncRafId: number | null = null;
+  const syncOverlayScroll = (): void => {
+    const fallbackTop = fallback.scrollTop;
+    const lineMaxTop = Math.max(0, lines.scrollHeight - lines.clientHeight);
+    const highlightMaxTop = Math.max(0, highlight.scrollHeight - highlight.clientHeight);
+    lines.scrollTop = Math.min(fallbackTop, lineMaxTop);
+    highlight.scrollTop = Math.min(fallbackTop, highlightMaxTop);
+    highlight.scrollLeft = fallback.scrollLeft;
+  };
+
   const syncLines = (): void => {
     lines.textContent = buildWrappedLineNumbers(fallback.value, estimateCharsPerVisualLine());
+    syncOverlayScroll();
   };
 
   const syncHighlight = (): void => {
@@ -409,12 +420,26 @@ function mountSimpleEditor(): void {
     syncLines();
     syncHighlight();
   });
-  fallback.addEventListener('scroll', () => {
-    lines.scrollTop = fallback.scrollTop;
-    highlight.scrollTop = fallback.scrollTop;
-    highlight.scrollLeft = fallback.scrollLeft;
-  });
-  window.addEventListener('resize', syncLines);
+  fallback.addEventListener(
+    'scroll',
+    () => {
+      if (scrollSyncRafId !== null) {
+        return;
+      }
+      scrollSyncRafId = window.requestAnimationFrame(() => {
+        scrollSyncRafId = null;
+        syncOverlayScroll();
+      });
+    },
+    { passive: true },
+  );
+  window.addEventListener('resize', syncLines, { passive: true });
+  if (typeof ResizeObserver !== 'undefined') {
+    const resizeObserver = new ResizeObserver(() => {
+      syncLines();
+    });
+    resizeObserver.observe(fallback);
+  }
 }
 
 function wireTemplateButtons(): void {

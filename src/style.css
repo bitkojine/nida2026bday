@@ -783,7 +783,7 @@ h1 {
   position: absolute;
   inset: 0;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 16px;
+  font-size: 14px;
   line-height: 1.45;
   white-space: pre-wrap;
   overflow-wrap: anywhere;
@@ -1042,7 +1042,7 @@ h1 {
   .fallback-lines,
   .fallback-highlight,
   .fallback-editor {
-    font-size: 12px;
+    font-size: 11px;
   }
 
   .template-row {
@@ -1054,7 +1054,7 @@ h1 {
   .monaco-editor,
   .monaco-editor .view-lines,
   .monaco-editor textarea {
-    font-size: 16px !important;
+    font-size: 14px !important;
   }
 }
 

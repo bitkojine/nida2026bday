@@ -16,7 +16,7 @@ export async function mountMonacoEditor(el: HTMLElement, initial: string): Promi
     value: initial,
     language: 'csharp',
     theme: 'vs',
-    fontSize: isTouchViewport ? 16 : 11,
+    fontSize: isTouchViewport ? 14 : 11,
     minimap: { enabled: false },
     scrollBeyondLastLine: false,
     automaticLayout: true,
