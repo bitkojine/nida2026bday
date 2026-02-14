@@ -1,0 +1,37 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="Šokanti Arklio Ritmo Dovana">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#ffe8bb" />
+      <stop offset="100%" stop-color="#ffbd66" />
+    </linearGradient>
+    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#96d88d" />
+      <stop offset="100%" stop-color="#5ca358" />
+    </linearGradient>
+  </defs>
+
+  <rect width="512" height="512" rx="108" fill="url(#bg)" />
+  <ellipse cx="256" cy="468" rx="250" ry="110" fill="url(#ground)" opacity="0.9" />
+
+  <!-- Gift ribbon -->
+  <path d="M248 86h16v340h-16z" fill="#db6f00" opacity="0.9" />
+  <path d="M88 244h336v24H88z" fill="#db6f00" opacity="0.9" />
+  <circle cx="256" cy="256" r="26" fill="#ffd379" stroke="#b95f00" stroke-width="6" />
+
+  <!-- Minimal horse head silhouette -->
+  <g transform="translate(148 168)">
+    <path d="M130 28h56v80h-18v20h52v62h-38v-24h-102v22H36v-58h42V54h26z" fill="#d39b6a" />
+    <path d="M116 10h42v24h-42z" fill="#b27446" />
+    <circle cx="150" cy="72" r="10" fill="#fffdf8" />
+    <circle cx="152" cy="74" r="4" fill="#2f2217" />
+    <rect x="206" y="80" width="16" height="30" rx="4" fill="#b27446" />
+  </g>
+
+  <!-- Rhythm arrows -->
+  <g fill="#5b3b1c">
+    <path d="M112 406l22-24 22 24h-16v24h-12v-24z" />
+    <path d="M188 430l24-22-24-22v16h-24v12h24z" />
+    <path d="M324 430l-24-22 24-22v16h24v12h-24z" />
+    <path d="M400 406l-22-24-22 24h16v24h12v-24z" />
+  </g>
+</svg>
