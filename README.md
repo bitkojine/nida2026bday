@@ -9,10 +9,10 @@ Pirminis taikinys: iPhone Safari. Taip pat veikia desktop naršyklėse.
 - C# studija žaidimo taisyklėms keisti realiu laiku
 - Mokymosi misijos (`0/5` -> `5/5`) su šablonų atrakinimo atlygiu
 - Šokantis arklys (`canvas`) su spalvų, kepurių ir oro efektų valdymu per C#
-- Gyvi našumo rodikliai poraštėje (`FPS`, `ms`, atmintis, garso balsai, dalelės)
+- Gyvi našumo rodikliai poraštėje (lietuviški: `kadr./s`, `ms`, atmintis, garso balsai, dalelės)
 - Lietuviška UI ir dedikacija:
   - `Skirta Nidai – nuo Roberto. Su gimtadieniu! 🎉`
-  - rodoma žaidimo apačioje visada
+  - rodoma iškart po pagrindiniu pavadinimu
 
 ## Technologijos
 
@@ -117,10 +117,11 @@ Deploy modelis:
 - Touch-first UI, be hover priklausomybės
 - Safe-area palaikymas (`viewport-fit=cover`, `env(safe-area-inset-*)`)
 - iPhone fokusavimo zoom prevencija redaktoriuje (no-zoom viewport + mobile editor font sizing)
+- Optimizuotas iPhone landscape išdėstymas (safe-area + sumažinti aukščiai, kad viskas tilptų patogiai)
 - Adaptyvus vizualinis FPS mobiliuose:
-  - autoplay: ~36 FPS
-  - manual: ~45 FPS
-  - desktop: ~60 FPS
+  - autoplay: ~36 kadr./s
+  - manual: ~45 kadr./s
+  - desktop: ~60 kadr./s
 - `requestAnimationFrame` renderis ir lengvos animacijos
 
 ## Pastabos apie C# runtime

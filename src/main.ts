@@ -63,6 +63,22 @@ app.innerHTML = `
         <button data-lane="3" aria-label="Dešinė"><span>→</span></button>
       </div>
 
+      <section class="puzzle-panel" aria-label="Programavimo misijos">
+        <div class="puzzle-head">
+          <strong>Mokymosi misijos</strong>
+          <span id="puzzleProgress">0 / 5</span>
+        </div>
+        <p class="puzzle-story" id="puzzleStory"></p>
+        <p class="puzzle-goal" id="puzzleGoal"></p>
+        <p class="puzzle-hint" id="puzzleHint"></p>
+        <p class="puzzle-done" id="puzzleDone" hidden>
+          Puiku! Arklys sugrojo „Su gimtadieniu“ iki galo. 🎶 🎁 Šablonų atlygis atrakintas!
+        </p>
+        <p class="puzzle-lock-note" id="templateLockNote">
+          🎁 Atlygis: šablonai. Užbaik visas misijas ir atrakink šablonų mygtukus! ✨
+        </p>
+      </section>
+
       <details class="code-studio">
         <summary>
           <span>C# studija: keisk žaidimo taisykles</span>
@@ -70,34 +86,18 @@ app.innerHTML = `
         <section class="editor-panel">
           <div id="editor" class="editor"></div>
         </section>
-        <section class="template-panel" aria-label="C# šablonai">
-          <section class="puzzle-panel" aria-label="Programavimo misijos">
-            <div class="puzzle-head">
-              <strong>Mokymosi misijos</strong>
-              <span id="puzzleProgress">0 / 5</span>
-            </div>
-            <p class="puzzle-story" id="puzzleStory"></p>
-            <p class="puzzle-goal" id="puzzleGoal"></p>
-            <p class="puzzle-hint" id="puzzleHint"></p>
-            <p class="puzzle-done" id="puzzleDone" hidden>
-              Puiku! Arklys sugrojo „Su gimtadieniu“ iki galo. 🎶 🎁 Šablonų atlygis atrakintas!
-            </p>
-            <p class="puzzle-lock-note" id="templateLockNote">
-              🎁 Atlygis: šablonai. Užbaik visas misijas ir atrakink šablonų mygtukus! ✨
-            </p>
-          </section>
-          <section id="templateReward" hidden>
-            <p class="template-title">Greiti šablonai: išbandyk, kas įmanoma</p>
-            <div class="template-row">
-              ${DANCE_RULE_TEMPLATES.map(
-                (template) =>
-                  `<button class="template-btn" type="button" data-template-id="${template.id}" title="${template.descriptionLt}">${template.labelLt}</button>`,
-              ).join('')}
-            </div>
-          </section>
+        <section id="templateReward" class="template-panel" aria-label="C# šablonai" hidden>
+          <p class="template-title">Greiti šablonai: išbandyk, kas įmanoma</p>
+          <div class="template-row">
+            ${DANCE_RULE_TEMPLATES.map(
+              (template) =>
+                `<button class="template-btn" type="button" data-template-id="${template.id}" title="${template.descriptionLt}">${template.labelLt}</button>`,
+            ).join('')}
+          </div>
         </section>
       </details>
       <section class="perf-stack" aria-label="Našumo statistika">
+        <p class="footer-info-title">ℹ️ Papildoma informacija apie žaidimą</p>
         <p class="build-number">Versija: ${__BUILD_VILNIUS_TIME__} (Lietuva)</p>
         <p class="perf-stats" id="perfStats">Našumas: įkeliama...</p>
       </section>
@@ -307,7 +307,6 @@ function mountSimpleEditor(): void {
   if (!highlight) {
     return;
   }
-
   const measureCtx = document.createElement('canvas').getContext('2d');
 
   const estimateCharsPerVisualLine = (): number => {
