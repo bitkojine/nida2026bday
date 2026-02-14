@@ -17,6 +17,11 @@ async function updateDanceRulesCode(
   await fallback.fill(next);
 }
 
+function replaceRuleValue(source: string, field: string, valueLiteral: string): string {
+  const matcher = new RegExp(`(public\\s+[\\w<>]+\\s+${field}\\s*=\\s*)([^;]+)(;)`);
+  return source.replace(matcher, `$1${valueLiteral}$3`);
+}
+
 test.describe('Rhythm game flow', () => {
   test.beforeEach(async ({ page }) => {
     await page.addInitScript(() => {
@@ -71,6 +76,30 @@ test.describe('Rhythm game flow', () => {
       await page.locator('.code-studio summary').click();
     }
 
+    await expect(page.locator('#templateReward')).toBeHidden();
+    await expect(page.locator('#templateLockNote')).toBeVisible();
+
+    await updateDanceRulesCode(page, (source) =>
+      source
+        .replace('public float tobulasLangas = 0.05f;', 'public float tobulasLangas = 0.09f;')
+        .replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 210;')
+        .replace('public int geriTaskai = 50;', 'public int geriTaskai = 120;')
+        .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 3;')
+        .replace('public bool suKepure = false;', 'public bool suKepure = true;')
+        .replace(
+          'public string kepuresTipas = "KLASIKINE";',
+          'public string kepuresTipas = "KARUNA";',
+        )
+        .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "ZAIBAS";')
+        .replace(
+          'public string arklioSpalva = "#d6b48a";',
+          'public string arklioSpalva = "#ff9f66";',
+        ),
+    );
+
+    await expect(page.locator('#templateReward')).toBeVisible();
+    await expect(page.locator('#templateLockNote')).toBeHidden();
+
     await page.locator('.template-btn[data-template-id="uzsivedimo-raketa"]').click();
 
     await expect
@@ -87,6 +116,210 @@ test.describe('Rhythm game flow', () => {
     expect(rules?.serijaIkiHype).toBe(3);
     expect(rules?.suKepure).toBe(true);
     expect(rules?.oroEfektas).toBe('SAULETA');
+  });
+
+  test('passes all learning missions step-by-step and unlocks templates', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    const studio = page.locator('.code-studio');
+    const isOpen = await studio.evaluate((node) => (node as HTMLDetailsElement).open);
+    if (!isOpen) {
+      await page.locator('.code-studio summary').click();
+    }
+
+    const progress = page.locator('#puzzleProgress');
+    await expect(progress).toHaveText('0 / 5');
+    await expect(page.locator('#templateReward')).toBeHidden();
+    await expect(page.locator('#templateLockNote')).toBeVisible();
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('public float tobulasLangas = 0.05f;', 'public float tobulasLangas = 0.08f;'),
+    );
+    await expect(progress).toHaveText('1 / 5');
+
+    await updateDanceRulesCode(page, (source) =>
+      source
+        .replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 170;')
+        .replace('public int geriTaskai = 50;', 'public int geriTaskai = 80;'),
+    );
+    await expect(progress).toHaveText('2 / 5');
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 4;'),
+    );
+    await expect(progress).toHaveText('3 / 5');
+
+    await updateDanceRulesCode(page, (source) =>
+      source
+        .replace('public bool suKepure = false;', 'public bool suKepure = true;')
+        .replace(
+          'public string kepuresTipas = "KLASIKINE";',
+          'public string kepuresTipas = "KAUBOJAUS";',
+        ),
+    );
+    await expect(progress).toHaveText('4 / 5');
+
+    await updateDanceRulesCode(page, (source) =>
+      source
+        .replace(
+          'public string kepuresTipas = "KAUBOJAUS";',
+          'public string kepuresTipas = "KARUNA";',
+        )
+        .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "ZAIBAS";')
+        .replace(
+          'public string arklioSpalva = "#d6b48a";',
+          'public string arklioSpalva = "#ff8b3d";',
+        ),
+    );
+    await expect(progress).toHaveText('5 / 5');
+
+    await expect(page.locator('#puzzleDone')).toBeVisible();
+    await expect(page.locator('#templateReward')).toBeVisible();
+    await expect(page.locator('#templateLockNote')).toBeHidden();
+  });
+
+  test('missions still complete when required changes are applied in different order', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    const studio = page.locator('.code-studio');
+    const isOpen = await studio.evaluate((node) => (node as HTMLDetailsElement).open);
+    if (!isOpen) {
+      await page.locator('.code-studio summary').click();
+    }
+
+    const progress = page.locator('#puzzleProgress');
+    await expect(progress).toHaveText('0 / 5');
+
+    // Apply late-mission values first, then fill early-mission requirements last.
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'oroEfektas', '"ZAIBAS"'),
+    );
+    await expect(progress).toHaveText('0 / 5');
+
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'arklioSpalva', '"#22aaff"'),
+    );
+    await expect(progress).toHaveText('0 / 5');
+
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'serijaIkiUzsivedimo', '4'),
+    );
+    await expect(progress).toHaveText('0 / 5');
+
+    await updateDanceRulesCode(page, (source) => replaceRuleValue(source, 'suKepure', 'true'));
+    await expect(progress).toHaveText('0 / 5');
+
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'kepuresTipas', '"KARUNA"'),
+    );
+    await expect(progress).toHaveText('0 / 5');
+
+    await updateDanceRulesCode(page, (source) => replaceRuleValue(source, 'geriTaskai', '80'));
+    await expect(progress).toHaveText('0 / 5');
+
+    await updateDanceRulesCode(page, (source) => replaceRuleValue(source, 'tobuliTaskai', '170'));
+    await expect(progress).toHaveText('0 / 5');
+
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'tobulasLangas', '0.08f'),
+    );
+    await expect(progress).toHaveText('5 / 5');
+
+    await expect(page.locator('#puzzleDone')).toBeVisible();
+    await expect(page.locator('#templateReward')).toBeVisible();
+    await expect(page.locator('#templateLockNote')).toBeHidden();
+  });
+
+  test('last mission remains stable when required values are edited in mixed order', async ({
+    page,
+  }) => {
+    const reachLastMissionGate = async (): Promise<void> => {
+      await page.goto('/');
+      await expect(page.locator('#gameScreen')).toBeVisible();
+
+      const studio = page.locator('.code-studio');
+      const isOpen = await studio.evaluate((node) => (node as HTMLDetailsElement).open);
+      if (!isOpen) {
+        await page.locator('.code-studio summary').click();
+      }
+
+      await updateDanceRulesCode(page, (source) =>
+        source
+          .replace('public float tobulasLangas = 0.05f;', 'public float tobulasLangas = 0.08f;')
+          .replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 170;')
+          .replace('public int geriTaskai = 50;', 'public int geriTaskai = 80;')
+          .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 4;')
+          .replace('public bool suKepure = false;', 'public bool suKepure = true;')
+          .replace(
+            'public string kepuresTipas = "KLASIKINE";',
+            'public string kepuresTipas = "KARUNA";',
+          ),
+      );
+
+      await expect(page.locator('#puzzleProgress')).toHaveText('4 / 5');
+    };
+
+    // Order A + backtracking: weather first, then color, then intentionally break/recover.
+    await reachLastMissionGate();
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'oroEfektas', '"ZAIBAS"'),
+    );
+    await expect(page.locator('#puzzleProgress')).toHaveText('4 / 5');
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'arklioSpalva', '"#39a7ff"'),
+    );
+    await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'oroEfektas', '"SAULETA"'),
+    );
+    await expect(page.locator('#puzzleProgress')).toHaveText('4 / 5');
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'oroEfektas', '"LIETINGA"'),
+    );
+    await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'arklioSpalva', '"#d6b48a"'),
+    );
+    await expect(page.locator('#puzzleProgress')).toHaveText('4 / 5');
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'arklioSpalva', '"#39a7ff"'),
+    );
+    await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'kepuresTipas', '"KAUBOJAUS"'),
+    );
+    await expect(page.locator('#puzzleProgress')).toHaveText('4 / 5');
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'kepuresTipas', '"KARUNA"'),
+    );
+    await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
+
+    // Order B + backtracking: color first, then weather, then intentionally break/recover.
+    await reachLastMissionGate();
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'arklioSpalva', '"#39a7ff"'),
+    );
+    await expect(page.locator('#puzzleProgress')).toHaveText('4 / 5');
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'oroEfektas', '"ZAIBAS"'),
+    );
+    await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'arklioSpalva', '"#d6b48a"'),
+    );
+    await expect(page.locator('#puzzleProgress')).toHaveText('4 / 5');
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'oroEfektas', '"SNIEGAS"'),
+    );
+    await expect(page.locator('#puzzleProgress')).toHaveText('4 / 5');
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'arklioSpalva', '"#8d5cff"'),
+    );
+    await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
   });
 
   test('autoplay increases score without manual input', async ({ page }) => {

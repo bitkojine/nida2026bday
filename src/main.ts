@@ -13,6 +13,7 @@ import { HorseAnimator } from './render/horseAnimator';
 import { CodeCompilerService } from './services/codeCompilerService';
 import { CSHARP_TEMPLATE } from './services/csharpTemplate';
 import { applyCompileResult, wireFallbackCompiler } from './ui/compileFeedback';
+import { evaluatePuzzleProgress } from './ui/codePuzzles';
 import { applyDanceRuleTemplate, DANCE_RULE_TEMPLATES } from './ui/danceRuleTemplates';
 import { highlightCSharp } from './ui/fallbackSyntaxHighlighter';
 import { buildWrappedLineNumbers } from './ui/lineNumberGutter';
@@ -93,13 +94,30 @@ app.innerHTML = `
           <div id="editor" class="editor"></div>
         </section>
         <section class="template-panel" aria-label="C# šablonai">
-          <p class="template-title">Greiti šablonai: išbandyk kas įmanoma</p>
-          <div class="template-row">
-            ${DANCE_RULE_TEMPLATES.map(
-              (template) =>
-                `<button class="template-btn" type="button" data-template-id="${template.id}" title="${template.descriptionLt}">${template.labelLt}</button>`,
-            ).join('')}
-          </div>
+          <section class="puzzle-panel" aria-label="Programavimo misijos">
+            <div class="puzzle-head">
+              <strong>Mokymosi misijos</strong>
+              <span id="puzzleProgress">0 / 5</span>
+            </div>
+            <p class="puzzle-story" id="puzzleStory"></p>
+            <p class="puzzle-goal" id="puzzleGoal"></p>
+            <p class="puzzle-hint" id="puzzleHint"></p>
+            <p class="puzzle-done" id="puzzleDone" hidden>
+              Puiku! Arklys sugrojo „Su gimtadieniu“ iki galo. 🎶 🎁 Šablonų atlygis atrakintas!
+            </p>
+            <p class="puzzle-lock-note" id="templateLockNote">
+              🎁 Atlygis: šablonai. Užbaik visas misijas ir atrakink šablonų mygtukus! ✨
+            </p>
+          </section>
+          <section id="templateReward" hidden>
+            <p class="template-title">Greiti šablonai: išbandyk kas įmanoma</p>
+            <div class="template-row">
+              ${DANCE_RULE_TEMPLATES.map(
+                (template) =>
+                  `<button class="template-btn" type="button" data-template-id="${template.id}" title="${template.descriptionLt}">${template.labelLt}</button>`,
+              ).join('')}
+            </div>
+          </section>
         </section>
       </details>
       <p class="dedication dedication-footer">${DEDICATION_TEXT} 🎉</p>
@@ -118,6 +136,13 @@ const autoplayToggleEl = requiredElement<HTMLButtonElement>('#autoplayToggle');
 const compileStatusEl = requiredElement<HTMLElement>('#compileStatus');
 const compileHelpToggleEl = requiredElement<HTMLButtonElement>('#compileHelpToggle');
 const compileHelpPanelEl = requiredElement<HTMLElement>('#compileHelpPanel');
+const puzzleProgressEl = requiredElement<HTMLElement>('#puzzleProgress');
+const puzzleStoryEl = requiredElement<HTMLElement>('#puzzleStory');
+const puzzleGoalEl = requiredElement<HTMLElement>('#puzzleGoal');
+const puzzleHintEl = requiredElement<HTMLElement>('#puzzleHint');
+const puzzleDoneEl = requiredElement<HTMLElement>('#puzzleDone');
+const templateLockNoteEl = requiredElement<HTMLElement>('#templateLockNote');
+const templateRewardEl = requiredElement<HTMLElement>('#templateReward');
 const laneHighwayEl = requiredElement<HTMLElement>('#laneHighway');
 const canvas = requiredElement<HTMLCanvasElement>('#horseCanvas');
 const editorHost = requiredElement<HTMLDivElement>('#editor');
@@ -176,6 +201,33 @@ function applyGlobalWeatherTheme(weather: string): void {
 function setRules(next: DanceRules): void {
   rules = next;
   applyGlobalWeatherTheme(next.oroEfektas);
+  renderPuzzleProgress();
+}
+
+function renderPuzzleProgress(): void {
+  const progress = evaluatePuzzleProgress(rules, readEditorSource());
+  const nextPuzzle = progress.nextPuzzle;
+  puzzleProgressEl.textContent = `${progress.solvedCount} / ${progress.totalCount}`;
+  const allSolved = nextPuzzle === null;
+  templateRewardEl.hidden = !allSolved;
+  templateLockNoteEl.hidden = allSolved;
+
+  if (allSolved) {
+    puzzleStoryEl.textContent = 'Visos misijos įvykdytos. Arklys pasiruošęs gimtadienio koncertui!';
+    puzzleGoalEl.textContent = 'Dabar gali laisvai eksperimentuoti ir kurti savo versiją.';
+    puzzleHintEl.textContent = 'Pabandyk kitą šabloną arba redaguok C# ranka.';
+    puzzleDoneEl.hidden = false;
+    return;
+  }
+
+  if (!nextPuzzle) {
+    return;
+  }
+
+  puzzleStoryEl.textContent = `${nextPuzzle.titleLt}: ${nextPuzzle.storyLt}`;
+  puzzleGoalEl.textContent = `Tikslas: ${nextPuzzle.goalLt}`;
+  puzzleHintEl.textContent = `💡 Užuomina: ${nextPuzzle.hintLt}`;
+  puzzleDoneEl.hidden = true;
 }
 
 function wireAudioBootstrap(): void {
@@ -1100,6 +1152,7 @@ wireCompileHelp();
 wireAudioBootstrap();
 wireInputs();
 applyGlobalWeatherTheme(rules.oroEfektas);
+renderPuzzleProgress();
 window.addEventListener('pagehide', (event) => {
   if (!event.persisted) {
     teardownGame();
