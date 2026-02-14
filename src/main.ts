@@ -17,7 +17,13 @@ import { applyCompileResult, wireFallbackCompiler } from './ui/compileFeedback';
 import { evaluatePuzzleProgress } from './ui/codePuzzles';
 import { applyDanceRuleTemplate, DANCE_RULE_TEMPLATES } from './ui/danceRuleTemplates';
 import { highlightCSharp } from './ui/fallbackSyntaxHighlighter';
-import { bindAudioBootstrapBindings, bindSimpleEditorResizeBindings } from './ui/lifecycleBindings';
+import {
+  bindAudioBootstrapBindings,
+  bindElementClick,
+  bindSimpleEditorResizeBindings,
+  bindWindowLifecycle,
+  bindWindowResize,
+} from './ui/lifecycleBindings';
 import { buildWrappedLineNumbers } from './ui/lineNumberGutter';
 import { mountMonacoEditor } from './ui/monacoEditor';
 
@@ -169,6 +175,10 @@ let writeEditorSource = (next: string): void => {
 };
 let cleanupAudioBootstrapBindings: (() => void) | null = null;
 let cleanupSimpleEditorResizeBindings: (() => void) | null = null;
+let cleanupInputBindings: (() => void) | null = null;
+let cleanupCanvasResizeBinding: (() => void) | null = null;
+let cleanupAutoplayToggleBinding: (() => void) | null = null;
+let cleanupWindowLifecycleBindings: (() => void) | null = null;
 let puzzlesUnlocked = false;
 const autoPlayedBeatIds = new Set<number>();
 const songPlayedBeatIds = new Set<number>();
@@ -344,6 +354,14 @@ function teardownGame(): void {
   cleanupAudioBootstrapBindings = null;
   cleanupSimpleEditorResizeBindings?.();
   cleanupSimpleEditorResizeBindings = null;
+  cleanupInputBindings?.();
+  cleanupInputBindings = null;
+  cleanupCanvasResizeBinding?.();
+  cleanupCanvasResizeBinding = null;
+  cleanupAutoplayToggleBinding?.();
+  cleanupAutoplayToggleBinding = null;
+  cleanupWindowLifecycleBindings?.();
+  cleanupWindowLifecycleBindings = null;
 
   if (loopRafId !== null) {
     window.cancelAnimationFrame(loopRafId);
@@ -820,7 +838,10 @@ function resizeCanvas(): void {
 }
 
 resizeCanvas();
-window.addEventListener('resize', resizeCanvas, { passive: true });
+function wireCanvasResize(): void {
+  cleanupCanvasResizeBinding?.();
+  cleanupCanvasResizeBinding = bindWindowResize(window, resizeCanvas);
+}
 
 function applyJudgement(judgement: Judgement, displayJudgement: string, lane: number | null): void {
   const before = state.getState().score;
@@ -1055,6 +1076,10 @@ async function initEditor(): Promise<void> {
 }
 
 function wireInputs(): void {
+  cleanupInputBindings?.();
+  const abortController = new AbortController();
+  const { signal } = abortController;
+
   const isTypingTarget = (target: EventTarget | null): boolean => {
     if (!(target instanceof HTMLElement)) {
       return false;
@@ -1119,96 +1144,145 @@ function wireInputs(): void {
         vibrateTap();
         startLanePress(performance.now() / 1000, lane);
       },
-      { passive: false },
+      { passive: false, signal },
     );
 
-    button.addEventListener('touchend', () => {
-      releasePointerLane(lane);
-    });
+    button.addEventListener(
+      'touchend',
+      () => {
+        releasePointerLane(lane);
+      },
+      { signal },
+    );
 
-    button.addEventListener('touchcancel', () => {
-      releasePointerLane(lane);
-    });
+    button.addEventListener(
+      'touchcancel',
+      () => {
+        releasePointerLane(lane);
+      },
+      { signal },
+    );
 
-    button.addEventListener('mousedown', () => {
+    button.addEventListener(
+      'mousedown',
+      () => {
+        audio.unlock();
+        if (pressedLanes.has(lane)) {
+          return;
+        }
+        pressedLanes.add(lane);
+        pulseLaneButton(lane);
+        startLanePress(performance.now() / 1000, lane);
+      },
+      { signal },
+    );
+
+    button.addEventListener(
+      'mouseup',
+      () => {
+        releasePointerLane(lane);
+      },
+      { signal },
+    );
+
+    button.addEventListener(
+      'mouseleave',
+      () => {
+        releasePointerLane(lane);
+      },
+      { signal },
+    );
+  });
+
+  window.addEventListener(
+    'mouseup',
+    () => {
+      const now = performance.now() / 1000;
+      for (const lane of Array.from(pressedLanes)) {
+        if (keyHeldLanes.has(lane)) {
+          continue;
+        }
+        pressedLanes.delete(lane);
+        releaseLanePress(now, lane);
+      }
+    },
+    { signal },
+  );
+
+  window.addEventListener(
+    'keydown',
+    (event) => {
+      if (isTypingTarget(event.target)) {
+        return;
+      }
+
+      const lane = normalizeLaneFromKey(event.key);
+      if (lane === null) {
+        return;
+      }
+
+      event.preventDefault();
       audio.unlock();
       if (pressedLanes.has(lane)) {
         return;
       }
+      keyHeldLanes.add(lane);
       pressedLanes.add(lane);
       pulseLaneButton(lane);
       startLanePress(performance.now() / 1000, lane);
-    });
+    },
+    { signal },
+  );
 
-    button.addEventListener('mouseup', () => {
-      releasePointerLane(lane);
-    });
+  window.addEventListener(
+    'keyup',
+    (event) => {
+      if (isTypingTarget(event.target)) {
+        return;
+      }
 
-    button.addEventListener('mouseleave', () => {
-      releasePointerLane(lane);
-    });
-  });
+      const lane = normalizeLaneFromKey(event.key);
+      if (lane === null) {
+        return;
+      }
 
-  window.addEventListener('mouseup', () => {
-    const now = performance.now() / 1000;
-    for (const lane of Array.from(pressedLanes)) {
-      if (keyHeldLanes.has(lane)) {
-        continue;
+      keyHeldLanes.delete(lane);
+      if (!pressedLanes.has(lane)) {
+        return;
       }
       pressedLanes.delete(lane);
-      releaseLanePress(now, lane);
-    }
-  });
+      releaseLanePress(performance.now() / 1000, lane);
+    },
+    { signal },
+  );
 
-  window.addEventListener('keydown', (event) => {
-    if (isTypingTarget(event.target)) {
-      return;
-    }
-
-    const lane = normalizeLaneFromKey(event.key);
-    if (lane === null) {
-      return;
-    }
-
-    event.preventDefault();
-    audio.unlock();
-    if (pressedLanes.has(lane)) {
-      return;
-    }
-    keyHeldLanes.add(lane);
-    pressedLanes.add(lane);
-    pulseLaneButton(lane);
-    startLanePress(performance.now() / 1000, lane);
-  });
-
-  window.addEventListener('keyup', (event) => {
-    if (isTypingTarget(event.target)) {
-      return;
-    }
-
-    const lane = normalizeLaneFromKey(event.key);
-    if (lane === null) {
-      return;
-    }
-
-    keyHeldLanes.delete(lane);
-    if (!pressedLanes.has(lane)) {
-      return;
-    }
-    pressedLanes.delete(lane);
-    releaseLanePress(performance.now() / 1000, lane);
-  });
+  cleanupInputBindings = (): void => {
+    abortController.abort();
+  };
 }
 
-requestAnimationFrame(resizeCanvas);
-state.goTo('play');
-state.resetRun();
+function wireAutoplayToggle(): void {
+  cleanupAutoplayToggleBinding?.();
+  const onAutoplayToggle = (): void => {
+    audio.unlock();
+    autoplayEnabled = !autoplayEnabled;
+    renderAutoplayUiState();
+  };
+  cleanupAutoplayToggleBinding = bindElementClick(autoplayToggleEl, onAutoplayToggle);
+}
 
-autoplayToggleEl.addEventListener('click', () => {
-  audio.unlock();
-  autoplayEnabled = !autoplayEnabled;
-  renderAutoplayUiState();
-});
+function wireWindowLifecycleBindings(): void {
+  cleanupWindowLifecycleBindings?.();
+  const onPageHide = (event: PageTransitionEvent): void => {
+    if (!event.persisted) {
+      teardownGame();
+    }
+  };
+  const onBeforeUnload = (): void => {
+    teardownGame();
+  };
+  cleanupWindowLifecycleBindings = bindWindowLifecycle(window, onPageHide, onBeforeUnload);
+}
 
 declare global {
   interface Window {
@@ -1415,15 +1489,15 @@ puzzlesUnlocked = readPuzzlesUnlocked();
 void initEditor();
 wireTemplateButtons();
 wireAudioBootstrap();
+wireCanvasResize();
 wireInputs();
+wireAutoplayToggle();
+wireWindowLifecycleBindings();
 renderAutoplayUiState();
 applyGlobalWeatherTheme(rules.oroEfektas);
 renderPuzzleProgress();
 fitHudValuesToBox();
-window.addEventListener('pagehide', (event) => {
-  if (!event.persisted) {
-    teardownGame();
-  }
-});
-window.addEventListener('beforeunload', teardownGame);
+requestAnimationFrame(resizeCanvas);
+state.goTo('play');
+state.resetRun();
 startLoop();

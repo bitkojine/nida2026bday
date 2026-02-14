@@ -76,3 +76,51 @@ export function bindSimpleEditorResizeBindings(
     observer?.disconnect();
   };
 }
+
+export function bindWindowResize(
+  win: Pick<Window, 'addEventListener' | 'removeEventListener'>,
+  onResize: () => void,
+): () => void {
+  win.addEventListener('resize', onResize, { passive: true });
+  let cleaned = false;
+  return (): void => {
+    if (cleaned) {
+      return;
+    }
+    cleaned = true;
+    win.removeEventListener('resize', onResize);
+  };
+}
+
+export function bindElementClick(
+  element: Pick<HTMLElement, 'addEventListener' | 'removeEventListener'>,
+  onClick: () => void,
+): () => void {
+  element.addEventListener('click', onClick);
+  let cleaned = false;
+  return (): void => {
+    if (cleaned) {
+      return;
+    }
+    cleaned = true;
+    element.removeEventListener('click', onClick);
+  };
+}
+
+export function bindWindowLifecycle(
+  win: Pick<Window, 'addEventListener' | 'removeEventListener'>,
+  onPageHide: (event: PageTransitionEvent) => void,
+  onBeforeUnload: () => void,
+): () => void {
+  win.addEventListener('pagehide', onPageHide);
+  win.addEventListener('beforeunload', onBeforeUnload);
+  let cleaned = false;
+  return (): void => {
+    if (cleaned) {
+      return;
+    }
+    cleaned = true;
+    win.removeEventListener('pagehide', onPageHide);
+    win.removeEventListener('beforeunload', onBeforeUnload);
+  };
+}

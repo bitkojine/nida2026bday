@@ -1,7 +1,10 @@
 import { describe, expect, test, vi } from 'vitest';
 import {
   bindAudioBootstrapBindings,
+  bindElementClick,
   bindSimpleEditorResizeBindings,
+  bindWindowLifecycle,
+  bindWindowResize,
 } from '../src/ui/lifecycleBindings';
 
 class FakeEventHub {
@@ -31,6 +34,10 @@ class FakeEventHub {
 
   dispatch(type: string): void {
     const event = new Event(type);
+    this.listeners.get(type)?.forEach((listener) => listener(event));
+  }
+
+  dispatchEventObject(type: string, event: Event): void {
     this.listeners.get(type)?.forEach((listener) => listener(event));
   }
 
@@ -125,5 +132,54 @@ describe('lifecycle bindings', () => {
     cleanup();
     expect(win.count('resize')).toBe(0);
     expect(disconnected).toBe(true);
+  });
+
+  test('window resize binding is removed by cleanup', () => {
+    const win = new FakeEventHub();
+    const onResize = vi.fn();
+    const cleanup = bindWindowResize(win as unknown as Window, onResize);
+
+    expect(win.count('resize')).toBe(1);
+    win.dispatch('resize');
+    expect(onResize).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    expect(win.count('resize')).toBe(0);
+    cleanup();
+    expect(win.count('resize')).toBe(0);
+  });
+
+  test('element click binding is removed by cleanup', () => {
+    const button = document.createElement('button');
+    const onClick = vi.fn();
+    const cleanup = bindElementClick(button, onClick);
+
+    button.click();
+    expect(onClick).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    button.click();
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  test('window lifecycle binding attaches and detaches pagehide/beforeunload', () => {
+    const win = new FakeEventHub();
+    const onPageHide = vi.fn();
+    const onBeforeUnload = vi.fn();
+    const cleanup = bindWindowLifecycle(win as unknown as Window, onPageHide, onBeforeUnload);
+
+    expect(win.count('pagehide')).toBe(1);
+    expect(win.count('beforeunload')).toBe(1);
+
+    const pageHideEvent = new Event('pagehide');
+    Object.defineProperty(pageHideEvent, 'persisted', { value: false });
+    win.dispatchEventObject('pagehide', pageHideEvent);
+    win.dispatch('beforeunload');
+    expect(onPageHide).toHaveBeenCalledTimes(1);
+    expect(onBeforeUnload).toHaveBeenCalledTimes(1);
+
+    cleanup();
+    expect(win.count('pagehide')).toBe(0);
+    expect(win.count('beforeunload')).toBe(0);
   });
 });
