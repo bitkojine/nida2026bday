@@ -3,13 +3,16 @@ import { GameAudio } from '../src/audio/gameAudio';
 
 class FakeAudioParam {
   value = 0;
+  peak = 0;
 
   setValueAtTime(value: number): void {
     this.value = value;
+    this.peak = Math.max(this.peak, value);
   }
 
   exponentialRampToValueAtTime(value: number): void {
     this.value = value;
+    this.peak = Math.max(this.peak, value);
   }
 
   cancelScheduledValues(): void {}
@@ -173,5 +176,29 @@ describe('GameAudio', () => {
     expect(holdGain?.disconnected).toBe(true);
     expect(holdFilter?.disconnected).toBe(true);
     expect(holdShaper?.disconnected).toBe(true);
+  });
+
+  test('drives transient and hold gains to full scale', () => {
+    const ctx = new FakeAudioContext();
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      value: class {
+        constructor() {
+          return ctx;
+        }
+      },
+    });
+
+    const audio = new GameAudio(false);
+    audio.unlock();
+    audio.onPress(0);
+    audio.startHold(1);
+
+    const masterGain = ctx.gains[0];
+    const transientGain = ctx.gains[1];
+    const holdGain = ctx.gains[2];
+    expect(masterGain?.gain.value).toBe(1);
+    expect(transientGain?.gain.peak).toBe(1);
+    expect(holdGain?.gain.peak).toBe(1);
   });
 });

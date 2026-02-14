@@ -63,8 +63,6 @@ export class GameAudio {
 
   private readonly distortionCurve = createDistortionCurve(60);
 
-  private readonly outputBoost = 1;
-
   private activeTransientVoices = 0;
 
   private readonly maxTransientVoices = 36;
@@ -157,12 +155,7 @@ export class GameAudio {
     return this.unlocked;
   }
 
-  private noteInstrument(
-    frequency: number,
-    durationSec: number,
-    volume: number,
-    whenOffsetSec = 0,
-  ): void {
+  private noteInstrument(frequency: number, durationSec: number, whenOffsetSec = 0): void {
     if (this.muted) {
       return;
     }
@@ -192,14 +185,8 @@ export class GameAudio {
     lowpass.Q.setValueAtTime(0.8, now);
 
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(
-      Math.max(0.0001, Math.min(1, volume * this.outputBoost)),
-      now + 0.006,
-    );
-    gain.gain.exponentialRampToValueAtTime(
-      Math.max(0.0001, Math.min(1, volume * this.outputBoost * 0.7)),
-      now + durationSec * 0.38,
-    );
+    gain.gain.exponentialRampToValueAtTime(1, now + 0.006);
+    gain.gain.exponentialRampToValueAtTime(1, now + durationSec * 0.38);
     gain.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
 
     osc.connect(shaper);
@@ -217,13 +204,13 @@ export class GameAudio {
 
   onPress(lane: number): void {
     const laneHz = laneFrequency(lane);
-    this.noteInstrument(laneHz * 2, 0.06, 0.12);
+    this.noteInstrument(laneHz * 2, 0.06);
   }
 
   playSongGuideNote(frequency: number, holdDurationSec: number): void {
     this.debugState.guideNotesRequested += 1;
     const duration = Math.min(0.26, 0.08 + holdDurationSec * 0.24);
-    this.noteInstrument(frequency * 1.5, duration, 0.08);
+    this.noteInstrument(frequency * 1.5, duration);
     if (this.unlocked || this.muted) {
       this.debugState.guideNotesPlayed += 1;
     }
@@ -244,8 +231,8 @@ export class GameAudio {
     const fifth = root * 1.5;
     const duration = Math.min(1.0, Math.max(0.48, 0.44 + holdDurationSec * 0.54));
     // Use the same instrument family for backing notes too.
-    this.noteInstrument(root, duration, 0.08);
-    this.noteInstrument(fifth, Math.max(0.36, duration - 0.06), 0.06, 0.02);
+    this.noteInstrument(root, duration);
+    this.noteInstrument(fifth, Math.max(0.36, duration - 0.06), 0.02);
     this.debugState.backingNotesPlayed += 1;
   }
 
@@ -279,8 +266,8 @@ export class GameAudio {
     lowpass.frequency.exponentialRampToValueAtTime(980, now + 0.45);
     lowpass.Q.setValueAtTime(0.8, now);
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.1, now + 0.06);
-    gain.gain.exponentialRampToValueAtTime(0.08, now + 0.3);
+    gain.gain.exponentialRampToValueAtTime(1, now + 0.06);
+    gain.gain.exponentialRampToValueAtTime(1, now + 0.3);
 
     osc.connect(shaper);
     shaper.connect(lowpass);
