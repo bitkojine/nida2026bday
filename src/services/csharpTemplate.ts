@@ -15,7 +15,7 @@ export const CSHARP_TEMPLATE = `public class DanceRules : IDanceRules
     public int geriTaskai = 50;
 
     // Kiek paspaudimų iš eilės reikia, kad įsijungtų UŽSIVEDIMAS
-    public int serijaIkiHype = 10;
+    public int serijaIkiUzsivedimo = 10;
 
     // Arklio kūno spalva (HEX, pvz. #d6b48a)
     public string arklioSpalva = "#d6b48a";
@@ -26,7 +26,10 @@ export const CSHARP_TEMPLATE = `public class DanceRules : IDanceRules
     // Uždėti kepurę ant arklio (true / false)
     public bool suKepure = false;
 
-    // Oras aplink arklį (SAULETA / LIETINGA / SNIEGAS)
+    // Kepurės tipas, kai suKepure = true (KLASIKINE / KAUBOJAUS / KARUNA / RAGANOS)
+    public string kepuresTipas = "KLASIKINE";
+
+    // Oras aplink arklį (SAULETA / LIETINGA / SNIEGAS / ZAIBAS)
     public string oroEfektas = "SAULETA";
 
     // === GALI KEISTI AUKŠČIAU ===
@@ -56,8 +59,8 @@ export const CSHARP_TEMPLATE = `public class DanceRules : IDanceRules
         return 0;
     }
 
-    public bool ArHypeRezimui(int serija)
+    public bool ArUzsivedimui(int serija)
     {
-        return serija >= serijaIkiHype;
+        return serija >= serijaIkiUzsivedimo;
     }
 }`;

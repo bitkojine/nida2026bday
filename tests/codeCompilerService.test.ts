@@ -9,14 +9,16 @@ describe('CodeCompilerService', () => {
       CSHARP_TEMPLATE.replace('0.05f', '0.08f')
         .replace('"#d6b48a"', '"#112233"')
         .replace('false;', 'true;')
-        .replace('"SAULETA"', '"LIETINGA"'),
+        .replace('"KLASIKINE"', '"KAUBOJAUS"')
+        .replace('"SAULETA"', '"ZAIBAS"'),
     );
 
     expect(result.success).toBe(true);
     expect(result.rules.tobulasLangas).toBe(0.08);
     expect(result.rules.arklioSpalva).toBe('#112233');
     expect(result.rules.suKepure).toBe(true);
-    expect(result.rules.oroEfektas).toBe('LIETINGA');
+    expect(result.rules.kepuresTipas).toBe('KAUBOJAUS');
+    expect(result.rules.oroEfektas).toBe('ZAIBAS');
   });
 
   it('returns translated error for missing class', () => {
@@ -39,6 +41,7 @@ describe('CodeCompilerService', () => {
     const edited = CSHARP_TEMPLATE.replace('100;', '99999;')
       .replace('10;', '1;')
       .replace('"#d6b48a"', '"pink"')
+      .replace('"KLASIKINE"', '"PIRATAS"')
       .replace('"SAULETA"', '"AUDRA"');
 
     const result = service.compile(edited);
@@ -46,6 +49,7 @@ describe('CodeCompilerService', () => {
     expect(result.rules.tobuliTaskai).toBe(1000);
     expect(result.rules.serijaIkiHype).toBe(2);
     expect(result.rules.arklioSpalva).toBe('#d6b48a');
+    expect(result.rules.kepuresTipas).toBe('KLASIKINE');
     expect(result.rules.oroEfektas).toBe('SAULETA');
   });
 });

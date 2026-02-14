@@ -3,6 +3,11 @@
 :root {
   --bg-top: #fff6e8;
   --bg-bottom: #ffe9c8;
+  --planet-sky-top: #7db8ea;
+  --planet-sky-mid: #d7ecff;
+  --planet-ground-top: #8ccf7d;
+  --planet-ground-bottom: #5f9f52;
+  --weather-overlay-opacity: 0;
   --card: rgba(255, 255, 255, 0.9);
   --accent: #b86d00;
   --accent-2: #0c8b78;
@@ -28,9 +33,129 @@ body {
   font-family: 'Manrope', sans-serif;
   color: var(--text);
   overflow-x: hidden;
+  position: relative;
   background:
-    radial-gradient(circle at 12% 0%, #fff3da, transparent 42%),
-    linear-gradient(160deg, var(--bg-top), var(--bg-bottom));
+    radial-gradient(circle at 14% 10%, rgba(255, 248, 226, 0.7) 0%, rgba(255, 248, 226, 0) 32%),
+    radial-gradient(
+      120% 55% at 50% 112%,
+      rgba(143, 202, 114, 0.85) 0%,
+      rgba(121, 184, 96, 0.82) 45%,
+      rgba(102, 156, 81, 0.9) 68%,
+      rgba(89, 141, 70, 0.95) 100%
+    ),
+    linear-gradient(
+      180deg,
+      var(--planet-sky-top) 0%,
+      var(--planet-sky-mid) 60%,
+      var(--planet-ground-top) 71%,
+      var(--planet-ground-bottom) 100%
+    );
+}
+
+body::before,
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+body::before {
+  z-index: -2;
+  opacity: var(--weather-overlay-opacity);
+  transition: opacity 220ms ease;
+}
+
+body::after {
+  z-index: -1;
+  background: radial-gradient(
+    95% 50% at 50% 114%,
+    rgba(58, 98, 52, 0.58) 0%,
+    rgba(58, 98, 52, 0.3) 52%,
+    rgba(58, 98, 52, 0) 100%
+  );
+}
+
+body[data-weather='SAULETA'] {
+  --planet-sky-top: #7db8ea;
+  --planet-sky-mid: #d8eeff;
+  --planet-ground-top: #8ccf7d;
+  --planet-ground-bottom: #5f9f52;
+  --weather-overlay-opacity: 0;
+}
+
+body[data-weather='LIETINGA'] {
+  --planet-sky-top: #5f7794;
+  --planet-sky-mid: #8ea6bc;
+  --planet-ground-top: #648f63;
+  --planet-ground-bottom: #476a48;
+  --weather-overlay-opacity: 0.38;
+}
+
+body[data-weather='LIETINGA']::before {
+  background:
+    linear-gradient(180deg, rgba(22, 36, 52, 0.18), rgba(22, 36, 52, 0.3)),
+    repeating-linear-gradient(
+      100deg,
+      rgba(235, 244, 255, 0.12) 0px,
+      rgba(235, 244, 255, 0.12) 2px,
+      rgba(255, 255, 255, 0) 2px,
+      rgba(255, 255, 255, 0) 16px
+    );
+  background-size:
+    100% 100%,
+    220px 220px;
+  animation: rain-drift 460ms linear infinite;
+}
+
+body[data-weather='SNIEGAS'] {
+  --planet-sky-top: #73859d;
+  --planet-sky-mid: #c3d3e3;
+  --planet-ground-top: #9db0b9;
+  --planet-ground-bottom: #7b8f98;
+  --weather-overlay-opacity: 0.5;
+}
+
+body[data-weather='SNIEGAS']::before {
+  background:
+    radial-gradient(circle at 20% 12%, rgba(255, 255, 255, 0.22) 0 2px, transparent 3px),
+    radial-gradient(circle at 62% 28%, rgba(255, 255, 255, 0.2) 0 2px, transparent 3px),
+    radial-gradient(circle at 38% 60%, rgba(255, 255, 255, 0.22) 0 2px, transparent 3px),
+    radial-gradient(circle at 79% 76%, rgba(255, 255, 255, 0.2) 0 2px, transparent 3px),
+    linear-gradient(180deg, rgba(12, 25, 38, 0.1), rgba(12, 25, 38, 0.24));
+  background-size:
+    140px 140px,
+    180px 180px,
+    160px 160px,
+    200px 200px,
+    100% 100%;
+  animation: snow-drift 5.8s linear infinite;
+}
+
+body[data-weather='ZAIBAS'] {
+  --planet-sky-top: #2f3f58;
+  --planet-sky-mid: #4d607a;
+  --planet-ground-top: #4f7653;
+  --planet-ground-bottom: #355338;
+  --weather-overlay-opacity: 0.62;
+}
+
+body[data-weather='ZAIBAS']::before {
+  background:
+    linear-gradient(180deg, rgba(8, 16, 26, 0.24), rgba(8, 16, 26, 0.44)),
+    repeating-linear-gradient(
+      100deg,
+      rgba(220, 233, 247, 0.08) 0px,
+      rgba(220, 233, 247, 0.08) 2px,
+      rgba(255, 255, 255, 0) 2px,
+      rgba(255, 255, 255, 0) 16px
+    );
+  background-size:
+    100% 100%,
+    220px 220px;
+  animation:
+    rain-drift 430ms linear infinite,
+    sky-flash 2.8s ease-in-out infinite;
 }
 
 .layout {
@@ -452,6 +577,7 @@ h1 {
   padding: 10px 12px;
   padding-left: 34px;
   padding-right: 12px;
+  min-height: 44px;
   border-radius: 10px;
   border: 1px solid rgba(130, 93, 47, 0.2);
   background: #fff8eb;
@@ -494,12 +620,14 @@ h1 {
 .compile-status-wrap {
   display: inline-flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
 }
 
 .help-btn {
-  width: 26px;
-  height: 26px;
+  width: 34px;
+  height: 34px;
   border-radius: 999px;
   border: 1px solid rgba(95, 70, 43, 0.35);
   background: linear-gradient(180deg, #fffef8, #f4e4c4);
@@ -534,6 +662,45 @@ h1 {
 .compile-help ol {
   margin: 0;
   padding-left: 18px;
+}
+
+.template-panel {
+  margin-top: 8px;
+  border: 1px solid rgba(130, 93, 47, 0.2);
+  border-radius: 10px;
+  background: #fffaf1;
+  padding: 8px;
+}
+
+.template-title {
+  margin: 0 0 6px;
+  font-size: 0.78rem;
+  color: #6f5a43;
+  font-weight: 700;
+}
+
+.template-row {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.template-btn {
+  min-height: 44px;
+  border-radius: 9px;
+  border: 1px solid rgba(130, 93, 47, 0.25);
+  background: linear-gradient(180deg, #fffef8, #f8e8c6);
+  color: #3d2d1d;
+  font-weight: 800;
+  font-size: 0.74rem;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.template-btn.active {
+  border-color: rgba(112, 74, 31, 0.6);
+  box-shadow: inset 0 0 0 2px rgba(255, 214, 138, 0.65);
+  background: linear-gradient(180deg, #fff3d2, #f0ce8f);
 }
 
 .syntax-editor {
@@ -703,6 +870,60 @@ h1 {
   }
 }
 
+@keyframes rain-drift {
+  from {
+    background-position:
+      0 0,
+      0 0;
+  }
+
+  to {
+    background-position:
+      0 0,
+      -22px 160px;
+  }
+}
+
+@keyframes snow-drift {
+  from {
+    background-position:
+      0 0,
+      0 0,
+      0 0,
+      0 0,
+      0 0;
+  }
+
+  to {
+    background-position:
+      -18px 86px,
+      10px 94px,
+      -8px 102px,
+      16px 110px,
+      0 0;
+  }
+}
+
+@keyframes sky-flash {
+  0%,
+  70%,
+  100% {
+    filter: brightness(1);
+  }
+
+  72% {
+    filter: brightness(1.24);
+  }
+
+  74% {
+    filter: brightness(0.95);
+  }
+
+  76% {
+    filter: brightness(1.18);
+  }
+}
+
 @media (min-width: 860px) {
   .layout {
     display: grid;
@@ -717,6 +938,10 @@ h1 {
   .fallback-highlight,
   .fallback-editor {
     font-size: 13px;
+  }
+
+  .template-row {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
   }
 }
 

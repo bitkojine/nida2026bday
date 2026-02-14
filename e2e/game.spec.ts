@@ -55,6 +55,34 @@ test.describe('Rhythm game flow', () => {
     await expect(page.locator('#compileHelpPanel')).toBeHidden();
   });
 
+  test('template buttons load preset code and apply gameplay changes', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    const studio = page.locator('.code-studio');
+    const isOpen = await studio.evaluate((node) => (node as HTMLDetailsElement).open);
+    if (!isOpen) {
+      await page.locator('.code-studio summary').click();
+    }
+
+    await page.locator('.template-btn[data-template-id="uzsivedimo-raketa"]').click();
+
+    await expect
+      .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
+      .toContain('Paruošta');
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readEditorSource() ?? '');
+      })
+      .toContain('public int serijaIkiUzsivedimo = 3;');
+
+    const rules = await page.evaluate(() => window.__rhythmTest?.getRules());
+    expect(rules?.serijaIkiHype).toBe(3);
+    expect(rules?.suKepure).toBe(true);
+    expect(rules?.oroEfektas).toBe('SAULETA');
+  });
+
   test('autoplay increases score without manual input', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
@@ -177,7 +205,7 @@ test.describe('Rhythm game flow', () => {
     await updateDanceRulesCode(page, (source) =>
       source
         .replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 420;')
-        .replace('public int serijaIkiHype = 10;', 'public int serijaIkiHype = 50;'),
+        .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 50;'),
     );
 
     await expect
@@ -198,7 +226,7 @@ test.describe('Rhythm game flow', () => {
 
     await updateDanceRulesCode(page, (source) =>
       source
-        .replace('public int serijaIkiHype = 10;', 'public int serijaIkiHype = 2;')
+        .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 2;')
         .replace('public float tobulasLangas = 0.05f;', 'public float tobulasLangas = 0.2f;')
         .replace('public float gerasLangas = 0.12f;', 'public float gerasLangas = 0.25f;'),
     );
@@ -274,6 +302,7 @@ test.describe('Rhythm game flow', () => {
       expect(source).toContain('public string arklioSpalva');
       expect(source).toContain('public string karciuSpalva');
       expect(source).toContain('public bool suKepure');
+      expect(source).toContain('public string kepuresTipas');
       expect(source).toContain('public string oroEfektas');
       return source
         .replace(
@@ -281,6 +310,10 @@ test.describe('Rhythm game flow', () => {
           'public string arklioSpalva = "#3366cc";',
         )
         .replace('public bool suKepure = false;', 'public bool suKepure = true;')
+        .replace(
+          'public string kepuresTipas = "KLASIKINE";',
+          'public string kepuresTipas = "KAUBOJAUS";',
+        )
         .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "LIETINGA";');
     });
 
@@ -307,6 +340,10 @@ test.describe('Rhythm game flow', () => {
           'public string karciuSpalva = "#f5a300";',
         )
         .replace('public bool suKepure = false;', 'public bool suKepure = true;')
+        .replace(
+          'public string kepuresTipas = "KLASIKINE";',
+          'public string kepuresTipas = "RAGANOS";',
+        )
         .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "LIETINGA";'),
     );
 
@@ -319,7 +356,9 @@ test.describe('Rhythm game flow', () => {
     expect(after?.arklioSpalva).toBe('#1a8cff');
     expect(after?.karciuSpalva).toBe('#f5a300');
     expect(after?.suKepure).toBe(true);
+    expect(after?.kepuresTipas).toBe('RAGANOS');
     expect(after?.oroEfektas).toBe('LIETINGA');
+    await expect(page.locator('body')).toHaveAttribute('data-weather', 'LIETINGA');
   });
 
   test('all editable C# DanceRules fields change live gameplay behavior', async ({ page }) => {
@@ -332,7 +371,7 @@ test.describe('Rhythm game flow', () => {
         .replace('public float gerasLangas = 0.12f;', 'public float gerasLangas = 0.15f;')
         .replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 321;')
         .replace('public int geriTaskai = 50;', 'public int geriTaskai = 123;')
-        .replace('public int serijaIkiHype = 10;', 'public int serijaIkiHype = 2;')
+        .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 2;')
         .replace(
           'public string arklioSpalva = "#d6b48a";',
           'public string arklioSpalva = "#3366cc";',
@@ -342,6 +381,10 @@ test.describe('Rhythm game flow', () => {
           'public string karciuSpalva = "#ffcc00";',
         )
         .replace('public bool suKepure = false;', 'public bool suKepure = true;')
+        .replace(
+          'public string kepuresTipas = "KLASIKINE";',
+          'public string kepuresTipas = "KARUNA";',
+        )
         .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "SNIEGAS";'),
     );
 
@@ -412,6 +455,7 @@ test.describe('Rhythm game flow', () => {
     expect(rules?.arklioSpalva).toBe('#3366cc');
     expect(rules?.karciuSpalva).toBe('#ffcc00');
     expect(rules?.suKepure).toBe(true);
+    expect(rules?.kepuresTipas).toBe('KARUNA');
     expect(rules?.oroEfektas).toBe('SNIEGAS');
   });
 
@@ -552,6 +596,40 @@ test.describe('Rhythm game flow', () => {
     await expect(page.locator('#judgement')).toHaveText(/TOBULA|GERAI|UŽSIVEDĘS/);
   });
 
+  test('releasing just before hold end still scores within timing window', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(false);
+      window.__rhythmTest?.resetScore();
+    });
+
+    const hold = await page.evaluate(() => window.__rhythmTest?.peekNearestHoldAny());
+    expect(hold).not.toBeNull();
+    if (!hold) {
+      return;
+    }
+
+    await page.evaluate(
+      ({ lane, timeSec }) => {
+        window.__rhythmTest?.playLaneAt(lane, timeSec);
+      },
+      { lane: hold.lane, timeSec: hold.timeSec },
+    );
+    await expect(page.locator('#judgement')).toHaveText('LAIKYK');
+
+    await page.evaluate(
+      ({ lane, endSec }) => {
+        window.__rhythmTest?.releaseLaneAt(lane, endSec - 0.01);
+      },
+      { lane: hold.lane, endSec: hold.timeSec + hold.holdDurationSec },
+    );
+
+    await expect(page.locator('#score')).not.toHaveText('0');
+    await expect(page.locator('#judgement')).toHaveText(/TOBULA|GERAI|UŽSIVEDĘS/);
+  });
+
   test('releasing hold note too early counts as miss', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
@@ -652,13 +730,17 @@ test.describe('Rhythm game flow', () => {
         .replace('public float gerasLangas = 0.12f;', 'public float gerasLangas = 99f;')
         .replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 99999;')
         .replace('public int geriTaskai = 50;', 'public int geriTaskai = 1;')
-        .replace('public int serijaIkiHype = 10;', 'public int serijaIkiHype = 1;')
+        .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 1;')
         .replace('public string arklioSpalva = "#d6b48a";', 'public string arklioSpalva = "pink";')
         .replace(
           'public string karciuSpalva = "#7d4f2d";',
           'public string karciuSpalva = "#ABCDEF";',
         )
         .replace('public bool suKepure = false;', 'public bool suKepure = true;')
+        .replace(
+          'public string kepuresTipas = "KLASIKINE";',
+          'public string kepuresTipas = "PIRATAS";',
+        )
         .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "AUDRA";'),
     );
 
@@ -675,6 +757,7 @@ test.describe('Rhythm game flow', () => {
     expect(rules?.arklioSpalva).toBe('#d6b48a');
     expect(rules?.karciuSpalva).toBe('#ABCDEF');
     expect(rules?.suKepure).toBe(true);
+    expect(rules?.kepuresTipas).toBe('KLASIKINE');
     expect(rules?.oroEfektas).toBe('SAULETA');
   });
 
@@ -690,7 +773,7 @@ test.describe('Rhythm game flow', () => {
         .replace('public float gerasLangas = 0.12f;', 'public float gerasLangas = -2f;')
         .replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = -999;')
         .replace('public int geriTaskai = 50;', 'public int geriTaskai = abc;')
-        .replace('public int serijaIkiHype = 10;', 'public int serijaIkiHype = -1;'),
+        .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = -1;'),
     );
 
     await expect
@@ -718,7 +801,7 @@ test.describe('Rhythm game flow', () => {
       source
         .replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 999.7;')
         .replace('public int geriTaskai = 50;', 'public int geriTaskai = 4.4;')
-        .replace('public int serijaIkiHype = 10;', 'public int serijaIkiHype = 49.6;'),
+        .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 49.6;'),
     );
 
     await expect
@@ -742,6 +825,7 @@ test.describe('Rhythm game flow', () => {
         .replace('public string arklioSpalva = "#d6b48a";', '')
         .replace('public string karciuSpalva = "#7d4f2d";', 'public string karciuSpalva = "123";')
         .replace('public bool suKepure = false;', 'public bool suKepure = TRUE;')
+        .replace('public string kepuresTipas = "KLASIKINE";', 'public string kepuresTipas = "";')
         .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "??";'),
     );
 
@@ -753,6 +837,7 @@ test.describe('Rhythm game flow', () => {
     expect(rules?.arklioSpalva).toBe('#d6b48a'); // missing field -> default
     expect(rules?.karciuSpalva).toBe('#7d4f2d'); // invalid color -> default
     expect(rules?.suKepure).toBe(true); // bool parser is case-insensitive
+    expect(rules?.kepuresTipas).toBe('KLASIKINE'); // invalid hat -> default
     expect(rules?.oroEfektas).toBe('SAULETA'); // invalid weather -> default
 
     await expect

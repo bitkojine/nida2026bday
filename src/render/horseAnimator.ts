@@ -32,12 +32,14 @@ export class HorseAnimator {
     arklioSpalva: string;
     karciuSpalva: string;
     suKepure: boolean;
+    kepuresTipas: string;
     oroEfektas: string;
     mood: HorseMood;
   } = {
     arklioSpalva: '#d6b48a',
     karciuSpalva: '#7d4f2d',
     suKepure: false,
+    kepuresTipas: 'KLASIKINE',
     oroEfektas: 'SAULETA',
     mood: 'GERAI',
   };
@@ -93,6 +95,7 @@ export class HorseAnimator {
     arklioSpalva: string;
     karciuSpalva: string;
     suKepure: boolean;
+    kepuresTipas: string;
     oroEfektas: string;
     mood: HorseMood;
   } {
@@ -211,10 +214,15 @@ export class HorseAnimator {
     const sky = this.ctx.createLinearGradient(0, 0, 0, h * 0.62);
     const rainy = rules.oroEfektas === 'LIETINGA';
     const snowy = rules.oroEfektas === 'SNIEGAS';
+    const thunder = rules.oroEfektas === 'ZAIBAS';
     if (rainy) {
       sky.addColorStop(0, '#4f6478');
       sky.addColorStop(0.55, '#6f8598');
       sky.addColorStop(1, '#8ea0af');
+    } else if (thunder) {
+      sky.addColorStop(0, '#38485c');
+      sky.addColorStop(0.55, '#4f6176');
+      sky.addColorStop(1, '#697b8f');
     } else if (snowy) {
       sky.addColorStop(0, '#6a7f92');
       sky.addColorStop(0.55, '#8fa2b1');
@@ -231,6 +239,9 @@ export class HorseAnimator {
     if (rainy) {
       hill.addColorStop(0, '#5f7a63');
       hill.addColorStop(1, '#3f5e49');
+    } else if (thunder) {
+      hill.addColorStop(0, '#4f6656');
+      hill.addColorStop(1, '#314638');
     } else if (snowy) {
       hill.addColorStop(0, '#d9e0e5');
       hill.addColorStop(1, '#b2bcc7');
@@ -248,7 +259,8 @@ export class HorseAnimator {
     this.ctx.closePath();
     this.ctx.fill();
 
-    this.ctx.fillStyle = rainy ? 'rgba(223, 236, 244, 0.32)' : 'rgba(255, 255, 255, 0.52)';
+    this.ctx.fillStyle =
+      rainy || thunder ? 'rgba(223, 236, 244, 0.32)' : 'rgba(255, 255, 255, 0.52)';
     for (let i = 0; i < 3; i += 1) {
       const cloudX = ((i * 90 + t * 6) % (w + 120)) - 60;
       const cloudY = 18 + i * 14;
@@ -261,10 +273,20 @@ export class HorseAnimator {
 
     this.ctx.fillStyle = rainy
       ? 'rgba(42, 83, 54, 0.56)'
-      : snowy
-        ? 'rgba(178, 191, 204, 0.52)'
-        : 'rgba(56, 116, 56, 0.42)';
+      : thunder
+        ? 'rgba(36, 63, 43, 0.62)'
+        : snowy
+          ? 'rgba(178, 191, 204, 0.52)'
+          : 'rgba(56, 116, 56, 0.42)';
     this.ctx.fillRect(0, h * 0.76, w, h * 0.24);
+
+    if (thunder) {
+      const flash = Math.max(0, Math.sin(t * 7.5)) * Math.max(0, Math.sin(t * 19.2));
+      if (flash > 0.55) {
+        this.ctx.fillStyle = `rgba(220, 236, 255, ${(flash - 0.55) * 0.52})`;
+        this.ctx.fillRect(0, 0, w, h);
+      }
+    }
   }
 
   private drawWeather(t: number, w: number, h: number, rules: DanceRules): void {
@@ -307,6 +329,36 @@ export class HorseAnimator {
       return;
     }
 
+    if (rules.oroEfektas === 'ZAIBAS') {
+      this.ctx.save();
+      this.ctx.strokeStyle = 'rgba(153, 206, 255, 0.58)';
+      this.ctx.lineWidth = 2.3;
+      for (let i = 0; i < 12; i += 1) {
+        const x = ((i * 37 + t * 110) % (w + 44)) - 22;
+        const y = ((i * 57 + t * 205) % (h + 40)) - 20;
+        this.ctx.beginPath();
+        this.ctx.moveTo(x, y);
+        this.ctx.lineTo(x - 5, y + 13);
+        this.ctx.stroke();
+      }
+
+      const strikePulse = Math.max(0, Math.sin(t * 6.6)) * Math.max(0, Math.sin(t * 13.8));
+      if (strikePulse > 0.62) {
+        this.ctx.strokeStyle = `rgba(255, 249, 194, ${0.35 + (strikePulse - 0.62) * 1.1})`;
+        this.ctx.lineWidth = 3.2;
+        const baseX = w * (0.24 + (Math.sin(t * 1.7) + 1) * 0.5 * 0.52);
+        this.ctx.beginPath();
+        this.ctx.moveTo(baseX, 14);
+        this.ctx.lineTo(baseX - 14, 48);
+        this.ctx.lineTo(baseX + 6, 48);
+        this.ctx.lineTo(baseX - 16, 92);
+        this.ctx.stroke();
+      }
+
+      this.ctx.restore();
+      return;
+    }
+
     this.ctx.save();
     this.ctx.fillStyle = 'rgba(239, 248, 255, 0.9)';
     for (let i = 0; i < 16; i += 1) {
@@ -341,6 +393,7 @@ export class HorseAnimator {
       arklioSpalva: rules.arklioSpalva,
       karciuSpalva: rules.karciuSpalva,
       suKepure: rules.suKepure,
+      kepuresTipas: rules.kepuresTipas,
       oroEfektas: rules.oroEfektas,
       mood,
     };
@@ -495,10 +548,44 @@ export class HorseAnimator {
     this.ctx.fillRect(52, 24, 14, 46 - legSwing);
 
     if (rules.suKepure) {
-      this.ctx.fillStyle = '#2d3a63';
-      this.ctx.fillRect(46, -64, 42, 12);
-      this.ctx.fillRect(56, -77, 22, 14);
-      this.ctx.fillRect(82, -62, 20, 6);
+      if (rules.kepuresTipas === 'KAUBOJAUS') {
+        this.ctx.fillStyle = '#6a3e1f';
+        this.ctx.fillRect(44, -66, 48, 8);
+        this.ctx.fillRect(50, -79, 30, 16);
+        this.ctx.fillStyle = '#c68a45';
+        this.ctx.fillRect(59, -71, 12, 3);
+      } else if (rules.kepuresTipas === 'KARUNA') {
+        this.ctx.fillStyle = '#f0c73f';
+        this.ctx.fillRect(55, -66, 28, 8);
+        this.ctx.beginPath();
+        this.ctx.moveTo(55, -66);
+        this.ctx.lineTo(59, -79);
+        this.ctx.lineTo(65, -66);
+        this.ctx.lineTo(69, -80);
+        this.ctx.lineTo(74, -66);
+        this.ctx.lineTo(79, -78);
+        this.ctx.lineTo(83, -66);
+        this.ctx.closePath();
+        this.ctx.fill();
+        this.ctx.fillStyle = '#fff2a0';
+        this.ctx.fillRect(67, -76, 3, 3);
+      } else if (rules.kepuresTipas === 'RAGANOS') {
+        this.ctx.fillStyle = '#3f2f6e';
+        this.ctx.fillRect(48, -64, 40, 7);
+        this.ctx.beginPath();
+        this.ctx.moveTo(56, -64);
+        this.ctx.lineTo(66, -92);
+        this.ctx.lineTo(77, -64);
+        this.ctx.closePath();
+        this.ctx.fill();
+        this.ctx.fillStyle = '#9b6cff';
+        this.ctx.fillRect(57, -67, 21, 3);
+      } else {
+        this.ctx.fillStyle = '#2d3a63';
+        this.ctx.fillRect(46, -64, 42, 12);
+        this.ctx.fillRect(56, -77, 22, 14);
+        this.ctx.fillRect(82, -62, 20, 6);
+      }
     }
 
     this.drawNoteParticles(dtSec, mood, isHolding, holdingLane);

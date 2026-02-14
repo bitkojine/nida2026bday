@@ -31,7 +31,7 @@ npm run dev
 2. Spausk `Pradeti zaidima`.
 3. Ziurek i 4 juostu trasa: natos krenta is virsaus i apatine `hit` linija.
 4. Tapsink atitinkama juosta `A S K L` tik tada, kai nata pasiekia `hit` linija.
-5. Editoriuje keisk C# reikšmes (`tobulasLangas`, `geriTaskai`, `serijaIkiHype` ir t.t.).
+5. Editoriuje keisk C# reikšmes (`tobulasLangas`, `geriTaskai`, `serijaIkiUzsivedimo` ir t.t.).
 6. Stebek statusa virs editoriaus:
    `OK (...)` reiskia, kad taisykles pritaikytos iskart zaidime.
 
@@ -41,7 +41,7 @@ npm run dev
 npm run test
 ```
 
-Coverage slenkstis `>=90%` logikos moduliams (`timing`, `scoring`, `streak/hype`, `error translation`, `input normalization`, `dedication logic`).
+Coverage slenkstis `>=90%` logikos moduliams (`timing`, `scoring`, `streak/boost`, `error translation`, `input normalization`, `dedication logic`).
 
 ## E2E testai (lokaliai)
 

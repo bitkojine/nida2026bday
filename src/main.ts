@@ -13,6 +13,7 @@ import { HorseAnimator } from './render/horseAnimator';
 import { CodeCompilerService } from './services/codeCompilerService';
 import { CSHARP_TEMPLATE } from './services/csharpTemplate';
 import { applyCompileResult, wireFallbackCompiler } from './ui/compileFeedback';
+import { applyDanceRuleTemplate, DANCE_RULE_TEMPLATES } from './ui/danceRuleTemplates';
 import { highlightCSharp } from './ui/fallbackSyntaxHighlighter';
 import { buildWrappedLineNumbers } from './ui/lineNumberGutter';
 import { mountMonacoEditor } from './ui/monacoEditor';
@@ -91,6 +92,15 @@ app.innerHTML = `
         <section class="editor-panel">
           <div id="editor" class="editor"></div>
         </section>
+        <section class="template-panel" aria-label="C# šablonai">
+          <p class="template-title">Greiti šablonai: išbandyk kas įmanoma</p>
+          <div class="template-row">
+            ${DANCE_RULE_TEMPLATES.map(
+              (template) =>
+                `<button class="template-btn" type="button" data-template-id="${template.id}" title="${template.descriptionLt}">${template.labelLt}</button>`,
+            ).join('')}
+          </div>
+        </section>
       </details>
       <p class="dedication dedication-footer">${DEDICATION_TEXT} 🎉</p>
       <p class="build-number">Versija: ${__BUILD_VILNIUS_TIME__} (Vilnius)</p>
@@ -122,6 +132,11 @@ let rules: DanceRules = DEFAULT_RULES;
 let mood: HorseMood = 'GERAI';
 let compileTimer: number | null = null;
 let autoplayEnabled = true;
+let pendingEditorSource: string | null = null;
+let readEditorSource = (): string => pendingEditorSource ?? CSHARP_TEMPLATE;
+let writeEditorSource = (next: string): void => {
+  pendingEditorSource = next;
+};
 const autoPlayedBeatIds = new Set<number>();
 const songPlayedBeatIds = new Set<number>();
 const autoHeldLanes = new Set<number>();
@@ -143,6 +158,17 @@ if (!ctxOrNull) {
 const ctx: CanvasRenderingContext2D = ctxOrNull;
 
 const horseAnimator = new HorseAnimator(ctx);
+const allowedWeather = new Set(['SAULETA', 'LIETINGA', 'SNIEGAS', 'ZAIBAS']);
+
+function applyGlobalWeatherTheme(weather: string): void {
+  const normalized = allowedWeather.has(weather) ? weather : 'SAULETA';
+  document.body.setAttribute('data-weather', normalized);
+}
+
+function setRules(next: DanceRules): void {
+  rules = next;
+  applyGlobalWeatherTheme(next.oroEfektas);
+}
 
 function wireAudioBootstrap(): void {
   const tryUnlock = (): void => {
@@ -273,12 +299,24 @@ function mountSimpleEditor(): void {
 
   wireFallbackCompiler(fallback, CSHARP_TEMPLATE, compiler, {
     setRules: (next) => {
-      rules = next;
+      setRules(next);
     },
     setStatus: (next) => {
       compileStatusEl.textContent = next;
     },
   });
+
+  readEditorSource = (): string => fallback.value;
+  writeEditorSource = (next: string): void => {
+    fallback.value = next;
+    syncLines();
+    syncHighlight();
+    fallback.dispatchEvent(new Event('input', { bubbles: true }));
+  };
+
+  if (pendingEditorSource && pendingEditorSource !== fallback.value) {
+    writeEditorSource(pendingEditorSource);
+  }
 
   syncLines();
   syncHighlight();
@@ -292,6 +330,27 @@ function mountSimpleEditor(): void {
     highlight.scrollLeft = fallback.scrollLeft;
   });
   window.addEventListener('resize', syncLines);
+}
+
+function wireTemplateButtons(): void {
+  document.querySelectorAll<HTMLButtonElement>('.template-btn').forEach((button) => {
+    button.addEventListener('click', () => {
+      const templateId = button.dataset.templateId;
+      if (!templateId) {
+        return;
+      }
+
+      const next = applyDanceRuleTemplate(readEditorSource(), templateId);
+      if (next === readEditorSource()) {
+        return;
+      }
+
+      writeEditorSource(next);
+      document.querySelectorAll<HTMLButtonElement>('.template-btn').forEach((el) => {
+        el.classList.toggle('active', el === button);
+      });
+    });
+  });
 }
 
 function updateHud(score: number, streak: number, judgement: string): void {
@@ -321,7 +380,7 @@ function renderLanes(nowSec: number): void {
           trailSec,
         );
         const top = Math.min(y, endY);
-        const height = Math.max(8, Math.abs(endY - y));
+        const height = Math.max(2, Math.abs(endY - y));
         return `<div class="hold-tail hold-lane-${note.lane}" style="top:${top}%; height:${height}%"></div><div class="note note-lane-${note.lane} hold-head" style="top:${y}%; transform: translate(-50%, -50%) scale(${scale}); opacity:${opacity}"></div>`;
       }
 
@@ -335,7 +394,7 @@ function renderLanes(nowSec: number): void {
       const endY = computeNoteYPercent(remainingSec, leadSec, trailSec);
       const hitLine = 85;
       const top = Math.min(hitLine, endY);
-      const height = Math.max(10, hitLine - top);
+      const height = Math.max(1.2, hitLine - top);
       return `<div class="hold-active hold-lane-${hold.lane}" style="top:${top}%; height:${height}%"></div>`;
     })
     .join('');
@@ -602,7 +661,7 @@ async function initEditor(): Promise<void> {
     const runCompile = (): void => {
       applyCompileResult(editor.getValue(), compiler, {
         setRules: (next) => {
-          rules = next;
+          setRules(next);
         },
         setStatus: (next) => {
           compileStatusEl.textContent = next;
@@ -616,6 +675,19 @@ async function initEditor(): Promise<void> {
       }
       compileTimer = window.setTimeout(runCompile, 150);
     });
+
+    readEditorSource = (): string => editor.getValue();
+    writeEditorSource = (next: string): void => {
+      editor.setValue(next);
+      if (compileTimer !== null) {
+        window.clearTimeout(compileTimer);
+      }
+      runCompile();
+    };
+
+    if (pendingEditorSource && pendingEditorSource !== editor.getValue()) {
+      writeEditorSource(pendingEditorSource);
+    }
 
     runCompile();
   } catch {
@@ -806,10 +878,12 @@ declare global {
         arklioSpalva: string;
         karciuSpalva: string;
         suKepure: boolean;
+        kepuresTipas: string;
         oroEfektas: string;
         mood: HorseMood;
       };
       getRules(): DanceRules;
+      readEditorSource(): string;
       readAudioState(): {
         guideNotesRequested: number;
         guideNotesPlayed: number;
@@ -943,6 +1017,7 @@ window.__rhythmTest = {
     arklioSpalva: string;
     karciuSpalva: string;
     suKepure: boolean;
+    kepuresTipas: string;
     oroEfektas: string;
     mood: HorseMood;
   } {
@@ -950,6 +1025,9 @@ window.__rhythmTest = {
   },
   getRules(): DanceRules {
     return rules;
+  },
+  readEditorSource(): string {
+    return readEditorSource();
   },
   readAudioState(): {
     guideNotesRequested: number;
@@ -963,7 +1041,9 @@ window.__rhythmTest = {
 
 void compiler.init();
 void initEditor();
+wireTemplateButtons();
 wireCompileHelp();
 wireAudioBootstrap();
 wireInputs();
+applyGlobalWeatherTheme(rules.oroEfektas);
 startLoop();

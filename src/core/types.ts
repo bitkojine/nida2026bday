@@ -1,7 +1,8 @@
 export type Judgement = 'TOBULA' | 'GERAI' | 'PRALEISTA';
 
 export type HorseMood = Judgement | 'UZSIVEDIMAS';
-export type HorseWeather = 'SAULETA' | 'LIETINGA' | 'SNIEGAS';
+export type HorseWeather = 'SAULETA' | 'LIETINGA' | 'SNIEGAS' | 'ZAIBAS';
+export type HorseHat = 'KLASIKINE' | 'KAUBOJAUS' | 'KARUNA' | 'RAGANOS';
 
 export interface DanceRules {
   tobulasLangas: number;
@@ -12,6 +13,7 @@ export interface DanceRules {
   arklioSpalva: string;
   karciuSpalva: string;
   suKepure: boolean;
+  kepuresTipas: HorseHat;
   oroEfektas: HorseWeather;
 }
 
@@ -41,6 +43,7 @@ export const DEFAULT_RULES: DanceRules = {
   arklioSpalva: '#d6b48a',
   karciuSpalva: '#7d4f2d',
   suKepure: false,
+  kepuresTipas: 'KLASIKINE',
   oroEfektas: 'SAULETA',
 };
 

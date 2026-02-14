@@ -1,7 +1,7 @@
 import type { Judgement } from '../core/types';
 
 interface HoldTone {
-  oscillator: OscillatorNode;
+  oscillators: OscillatorNode[];
   gain: GainNode;
 }
 
@@ -13,7 +13,22 @@ interface AudioDebugState {
 }
 
 function laneFrequency(lane: number): number {
-  return [220, 262, 330, 392][Math.max(0, Math.min(3, lane))] ?? 220;
+  return [164.81, 196.0, 220.0, 246.94][Math.max(0, Math.min(3, lane))] ?? 164.81;
+}
+
+function createDistortionCurve(amount: number): Float32Array {
+  const samples = 256;
+  const curve = new Float32Array(samples);
+  const k = Math.max(1, amount);
+  for (let i = 0; i < samples; i += 1) {
+    const x = (i * 2) / samples - 1;
+    curve[i] = ((3 + k) * x * 20 * (Math.PI / 180)) / (Math.PI + k * Math.abs(x));
+  }
+  return curve;
+}
+
+function toWaveShaperCurve(input: Float32Array): Float32Array<ArrayBuffer> {
+  return input as unknown as Float32Array<ArrayBuffer>;
 }
 
 export class GameAudio {
@@ -32,6 +47,10 @@ export class GameAudio {
     backingNotesPlayed: 0,
   };
 
+  private readonly distortionCurve = createDistortionCurve(60);
+
+  private readonly outputBoost = 1;
+
   private getContext(): AudioContext | null {
     if (this.context) {
       return this.context;
@@ -47,7 +66,7 @@ export class GameAudio {
     try {
       this.context = new Ctor();
       this.master = this.context.createGain();
-      this.master.gain.value = 0.34;
+      this.master.gain.value = 1;
       this.master.connect(this.context.destination);
       return this.context;
     } catch {
@@ -76,10 +95,9 @@ export class GameAudio {
     return this.unlocked;
   }
 
-  private tone(
+  private noteInstrument(
     frequency: number,
     durationSec: number,
-    kind: OscillatorType,
     volume: number,
     whenOffsetSec = 0,
   ): void {
@@ -90,28 +108,47 @@ export class GameAudio {
 
     const now = ctx.currentTime + whenOffsetSec;
     const osc = ctx.createOscillator();
+    const shaper = ctx.createWaveShaper();
+    const lowpass = ctx.createBiquadFilter();
     const gain = ctx.createGain();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(frequency * 1.01, now);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(50, frequency * 0.985), now + 0.024);
+    shaper.curve = toWaveShaperCurve(this.distortionCurve);
+    shaper.oversample = '2x';
+    lowpass.type = 'lowpass';
+    lowpass.frequency.setValueAtTime(1900, now);
+    lowpass.frequency.exponentialRampToValueAtTime(1200, now + durationSec * 0.95);
+    lowpass.Q.setValueAtTime(0.8, now);
 
-    osc.type = kind;
-    osc.frequency.setValueAtTime(frequency, now);
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(volume, now + 0.012);
+    gain.gain.exponentialRampToValueAtTime(
+      Math.max(0.0001, Math.min(1, volume * this.outputBoost)),
+      now + 0.006,
+    );
+    gain.gain.exponentialRampToValueAtTime(
+      Math.max(0.0001, Math.min(1, volume * this.outputBoost * 0.7)),
+      now + durationSec * 0.38,
+    );
     gain.gain.exponentialRampToValueAtTime(0.0001, now + durationSec);
 
-    osc.connect(gain);
+    osc.connect(shaper);
+    shaper.connect(lowpass);
+    lowpass.connect(gain);
     gain.connect(this.master);
     osc.start(now);
     osc.stop(now + durationSec + 0.02);
   }
 
   onPress(lane: number): void {
-    this.tone(laneFrequency(lane), 0.045, 'triangle', 0.06);
+    const laneHz = laneFrequency(lane);
+    this.noteInstrument(laneHz * 2, 0.06, 0.12);
   }
 
   playSongGuideNote(frequency: number, holdDurationSec: number): void {
     this.debugState.guideNotesRequested += 1;
-    const duration = Math.min(0.28, 0.08 + holdDurationSec * 0.25);
-    this.tone(frequency, duration, 'sine', 0.045);
+    const duration = Math.min(0.26, 0.08 + holdDurationSec * 0.24);
+    this.noteInstrument(frequency * 1.5, duration, 0.08);
     if (this.unlocked) {
       this.debugState.guideNotesPlayed += 1;
     }
@@ -123,13 +160,12 @@ export class GameAudio {
       return;
     }
 
-    const root = Math.max(110, frequency * 0.5);
-    const third = root * 1.25;
+    const root = Math.max(82, frequency * 0.5);
     const fifth = root * 1.5;
-    const duration = Math.min(1.2, Math.max(0.55, 0.45 + holdDurationSec * 0.6));
-    this.tone(root, duration, 'triangle', 0.048);
-    this.tone(third, Math.max(0.45, duration - 0.04), 'sine', 0.032, 0.02);
-    this.tone(fifth, Math.max(0.4, duration - 0.09), 'sine', 0.03, 0.04);
+    const duration = Math.min(1.0, Math.max(0.48, 0.44 + holdDurationSec * 0.54));
+    // Use the same instrument family for backing notes too.
+    this.noteInstrument(root, duration, 0.08);
+    this.noteInstrument(fifth, Math.max(0.36, duration - 0.06), 0.06, 0.02);
     this.debugState.backingNotesPlayed += 1;
   }
 
@@ -144,18 +180,31 @@ export class GameAudio {
     }
 
     const now = ctx.currentTime;
-    const oscillator = ctx.createOscillator();
+    const osc = ctx.createOscillator();
+    const shaper = ctx.createWaveShaper();
+    const lowpass = ctx.createBiquadFilter();
     const gain = ctx.createGain();
-    oscillator.type = 'sine';
-    oscillator.frequency.setValueAtTime(laneFrequency(lane) * 0.75, now);
+    const baseHz = laneFrequency(lane) * 1.5;
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(baseHz, now);
+    osc.frequency.exponentialRampToValueAtTime(Math.max(50, baseHz * 0.99), now + 0.04);
+    shaper.curve = toWaveShaperCurve(this.distortionCurve);
+    shaper.oversample = '2x';
+    lowpass.type = 'lowpass';
+    lowpass.frequency.setValueAtTime(1500, now);
+    lowpass.frequency.exponentialRampToValueAtTime(980, now + 0.45);
+    lowpass.Q.setValueAtTime(0.8, now);
     gain.gain.setValueAtTime(0.0001, now);
-    gain.gain.exponentialRampToValueAtTime(0.055, now + 0.05);
+    gain.gain.exponentialRampToValueAtTime(0.1, now + 0.06);
+    gain.gain.exponentialRampToValueAtTime(0.08, now + 0.3);
 
-    oscillator.connect(gain);
+    osc.connect(shaper);
+    shaper.connect(lowpass);
+    lowpass.connect(gain);
     gain.connect(this.master);
-    oscillator.start(now);
+    osc.start(now);
 
-    this.holds.set(lane, { oscillator, gain });
+    this.holds.set(lane, { oscillators: [osc], gain });
   }
 
   stopHold(lane: number): void {
@@ -168,7 +217,9 @@ export class GameAudio {
     tone.gain.gain.cancelScheduledValues(now);
     tone.gain.gain.setValueAtTime(Math.max(0.0001, tone.gain.gain.value), now);
     tone.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
-    tone.oscillator.stop(now + 0.05);
+    for (const oscillator of tone.oscillators) {
+      oscillator.stop(now + 0.05);
+    }
     this.holds.delete(lane);
   }
 
@@ -182,28 +233,8 @@ export class GameAudio {
     judgement: Judgement,
     options: { hypeStart: boolean; streakMilestone: boolean; lane: number | null },
   ): void {
-    if (judgement === 'TOBULA') {
-      const base = laneFrequency(options.lane ?? 1) * 1.5;
-      this.tone(base, 0.09, 'triangle', 0.11);
-      this.tone(base * 1.25, 0.11, 'sine', 0.1, 0.015);
-    } else if (judgement === 'GERAI') {
-      this.tone(laneFrequency(options.lane ?? 1) * 1.1, 0.085, 'sine', 0.085);
-    } else {
-      this.tone(170, 0.08, 'sawtooth', 0.08);
-      this.tone(120, 0.09, 'square', 0.05, 0.03);
-    }
-
-    if (options.streakMilestone) {
-      this.tone(392, 0.09, 'triangle', 0.09);
-      this.tone(494, 0.11, 'triangle', 0.09, 0.04);
-      this.tone(587, 0.13, 'triangle', 0.09, 0.08);
-    }
-
-    if (options.hypeStart) {
-      this.tone(262, 0.12, 'square', 0.085);
-      this.tone(330, 0.12, 'square', 0.09, 0.06);
-      this.tone(440, 0.14, 'triangle', 0.1, 0.12);
-    }
+    void judgement;
+    void options;
   }
 
   readDebugState(): AudioDebugState {

@@ -3,12 +3,14 @@ import {
   DEFAULT_RULES,
   type CompileResult,
   type DanceRules,
+  type HorseHat,
   type HorseWeather,
 } from '../core/types';
 import { ensureDotnetRuntime } from './wasmRuntimeLoader';
 
 function clampRules(rules: DanceRules): DanceRules {
-  const allowedWeather = new Set<HorseWeather>(['SAULETA', 'LIETINGA', 'SNIEGAS']);
+  const allowedWeather = new Set<HorseWeather>(['SAULETA', 'LIETINGA', 'SNIEGAS', 'ZAIBAS']);
+  const allowedHats = new Set<HorseHat>(['KLASIKINE', 'KAUBOJAUS', 'KARUNA', 'RAGANOS']);
   const colorPattern = /^#[0-9a-f]{6}$/i;
   const arklioSpalva = colorPattern.test(rules.arklioSpalva)
     ? rules.arklioSpalva
@@ -19,6 +21,9 @@ function clampRules(rules: DanceRules): DanceRules {
   const oroEfektas = allowedWeather.has(rules.oroEfektas)
     ? rules.oroEfektas
     : DEFAULT_RULES.oroEfektas;
+  const kepuresTipas = allowedHats.has(rules.kepuresTipas)
+    ? rules.kepuresTipas
+    : DEFAULT_RULES.kepuresTipas;
 
   return {
     tobulasLangas: Math.min(0.2, Math.max(0.01, rules.tobulasLangas)),
@@ -29,13 +34,23 @@ function clampRules(rules: DanceRules): DanceRules {
     arklioSpalva,
     karciuSpalva,
     suKepure: rules.suKepure,
+    kepuresTipas,
     oroEfektas,
   };
 }
 
 function parseWeatherField(source: string, field: keyof DanceRules): HorseWeather | null {
   const value = parseStringField(source, field);
-  if (value === 'SAULETA' || value === 'LIETINGA' || value === 'SNIEGAS') {
+  if (value === 'SAULETA' || value === 'LIETINGA' || value === 'SNIEGAS' || value === 'ZAIBAS') {
+    return value;
+  }
+
+  return null;
+}
+
+function parseHatField(source: string, field: keyof DanceRules): HorseHat | null {
+  const value = parseStringField(source, field);
+  if (value === 'KLASIKINE' || value === 'KAUBOJAUS' || value === 'KARUNA' || value === 'RAGANOS') {
     return value;
   }
 
@@ -50,6 +65,18 @@ function parseField(source: string, field: keyof DanceRules): number | null {
   }
 
   return Number(match[1]);
+}
+
+function parseNumericByFieldNames(source: string, ...fields: string[]): number | null {
+  for (const field of fields) {
+    const regex = new RegExp(`public\\s+(?:float|int)\\s+${field}\\s*=\\s*([0-9.]+)f?\\s*;`, 'i');
+    const match = source.match(regex);
+    if (match) {
+      return Number(match[1]);
+    }
+  }
+
+  return null;
 }
 
 function parseStringField(source: string, field: keyof DanceRules): string | null {
@@ -124,10 +151,13 @@ export class CodeCompilerService {
       gerasLangas: parseField(source, 'gerasLangas') ?? DEFAULT_RULES.gerasLangas,
       tobuliTaskai: parseField(source, 'tobuliTaskai') ?? DEFAULT_RULES.tobuliTaskai,
       geriTaskai: parseField(source, 'geriTaskai') ?? DEFAULT_RULES.geriTaskai,
-      serijaIkiHype: parseField(source, 'serijaIkiHype') ?? DEFAULT_RULES.serijaIkiHype,
+      serijaIkiHype:
+        parseNumericByFieldNames(source, 'serijaIkiUzsivedimo', 'serijaIkiHype') ??
+        DEFAULT_RULES.serijaIkiHype,
       arklioSpalva: parseStringField(source, 'arklioSpalva') ?? DEFAULT_RULES.arklioSpalva,
       karciuSpalva: parseStringField(source, 'karciuSpalva') ?? DEFAULT_RULES.karciuSpalva,
       suKepure: parseBoolField(source, 'suKepure') ?? DEFAULT_RULES.suKepure,
+      kepuresTipas: parseHatField(source, 'kepuresTipas') ?? DEFAULT_RULES.kepuresTipas,
       oroEfektas: parseWeatherField(source, 'oroEfektas') ?? DEFAULT_RULES.oroEfektas,
     };
 
