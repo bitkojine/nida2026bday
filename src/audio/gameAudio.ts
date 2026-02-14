@@ -20,6 +20,10 @@ interface AudioRuntimeStats {
   unlocked: boolean;
 }
 
+interface NavigatorAudioSession {
+  type: 'auto' | 'ambient' | 'playback' | 'transient' | 'transient-solo';
+}
+
 function laneFrequency(lane: number): number {
   return [164.81, 196.0, 220.0, 246.94][Math.max(0, Math.min(3, lane))] ?? 164.81;
 }
@@ -65,6 +69,27 @@ export class GameAudio {
 
   private readonly maxTransientVoices = 36;
 
+  private configureAudioSessionForPlayback(): void {
+    if (this.muted) {
+      return;
+    }
+
+    const nav = navigator as Navigator & {
+      audioSession?: NavigatorAudioSession;
+    };
+    const session = nav.audioSession;
+    if (!session) {
+      return;
+    }
+    try {
+      if (session.type !== 'playback') {
+        session.type = 'playback';
+      }
+    } catch {
+      // Ignore environments where audioSession is read-only or unavailable.
+    }
+  }
+
   private disconnectNodes(...nodes: Array<AudioNode | null | undefined>): void {
     for (const node of nodes) {
       if (!node) {
@@ -109,6 +134,7 @@ export class GameAudio {
       return;
     }
 
+    this.configureAudioSessionForPlayback();
     const ctx = this.getContext();
     if (!ctx) {
       return;

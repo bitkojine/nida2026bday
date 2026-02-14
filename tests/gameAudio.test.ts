@@ -97,6 +97,29 @@ class FakeAudioContext {
 }
 
 describe('GameAudio', () => {
+  test('sets audio session to playback when unlocking on supported browsers', () => {
+    const ctx = new FakeAudioContext();
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      value: class {
+        constructor() {
+          return ctx;
+        }
+      },
+    });
+
+    const audioSession = { type: 'ambient' as const };
+    Object.defineProperty(navigator, 'audioSession', {
+      configurable: true,
+      value: audioSession,
+    });
+
+    const audio = new GameAudio(false);
+    audio.unlock();
+
+    expect(audioSession.type).toBe('playback');
+  });
+
   test('limits transient voices to prevent runaway overlap', () => {
     const ctx = new FakeAudioContext();
     Object.defineProperty(window, 'AudioContext', {
