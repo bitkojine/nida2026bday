@@ -342,6 +342,38 @@ h1 {
     );
 }
 
+.autoplay-overlay {
+  position: absolute;
+  left: 50%;
+  top: 16px;
+  transform: translateX(-50%) scale(0.96);
+  z-index: 7;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(124, 4, 4, 0.52);
+  background: linear-gradient(180deg, rgba(255, 86, 86, 0.95), rgba(197, 18, 18, 0.92));
+  color: #fff7f7;
+  font-family: 'Space Grotesk', sans-serif;
+  font-weight: 800;
+  font-size: var(--fs-small);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  box-shadow:
+    0 6px 18px rgba(129, 12, 12, 0.32),
+    inset 0 1px 0 rgba(255, 255, 255, 0.34);
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease;
+}
+
+.autoplay-overlay.show {
+  opacity: 1;
+  transform: translateX(-50%) scale(1);
+}
+
 .hit-line {
   position: absolute;
   left: 0;

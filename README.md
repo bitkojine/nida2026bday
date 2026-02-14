@@ -74,6 +74,11 @@ npx playwright install chromium webkit
 npm run test:e2e
 ```
 
+E2E projektai:
+
+- `iphone` (`WebKit`, iPhone 14 profilis)
+- `desktop-chromium` (`Chromium`, Desktop Chrome profilis)
+
 ### Viskas (typecheck + unit + e2e)
 
 ```bash
@@ -113,7 +118,12 @@ Deploy modelis:
 - Poraštėje rodoma papildoma informacija apie žaidimą ir našumą (lietuviškai, po vieną rodiklį eilutėje, kad išdėstymas nešokinėtų).
 - Rodomas build numeris pagal Lietuvos laiką.
 - Jei atminties API naršyklėje neprieinama, rodomas tekstas `neprieinama`.
-- Rodoma, kokie `localStorage` raktai naudojami (dev diagnostikai).
+- `localStorage` diagnostikoje rodoma:
+  - ar saugykla prieinama,
+  - bendras raktų kiekis,
+  - mūsų raktų (`nida2026bday:puzzlesUnlocked:v1`) būsena ir reikšmė,
+  - apytikslis saugyklos užimtumas,
+  - naršyklės `storage estimate` (`usage/quota`), jei API prieinama.
 
 ## Architektūra
 

@@ -52,6 +52,9 @@ app.innerHTML = `
 
       <section class="highway-shell" aria-label="Ritmo juostos">
         <div class="highway" id="laneHighway" aria-hidden="true"></div>
+        <div class="autoplay-overlay" id="autoplayOverlay" aria-live="polite">
+          DABAR ŽAIDŽIAMA AUTOMATIŠKAI
+        </div>
         <div class="hit-line"></div>
         <div class="judgement-pop" id="judgementPop">PRALEISTA</div>
       </section>
@@ -112,6 +115,7 @@ const multiplierEl = requiredElement<HTMLElement>('#multiplier');
 const judgementEl = requiredElement<HTMLElement>('#judgement');
 const judgementPopEl = requiredElement<HTMLElement>('#judgementPop');
 const autoplayToggleEl = requiredElement<HTMLButtonElement>('#autoplayToggle');
+const autoplayOverlayEl = requiredElement<HTMLElement>('#autoplayOverlay');
 const perfStatsEl = requiredElement<HTMLElement>('#perfStats');
 const puzzleProgressEl = requiredElement<HTMLElement>('#puzzleProgress');
 const puzzleStoryEl = requiredElement<HTMLElement>('#puzzleStory');
@@ -699,6 +703,11 @@ function updatePerformanceStats(nowMs: number): void {
   perfFrameMsTotal = 0;
 }
 
+function renderAutoplayUiState(): void {
+  autoplayToggleEl.textContent = `Žaisti automatiškai: ${autoplayEnabled ? 'TAIP' : 'NE'}`;
+  autoplayOverlayEl.classList.toggle('show', autoplayEnabled);
+}
+
 function shouldRenderVisualFrame(timeMs: number): boolean {
   const targetVisualFps = IS_COARSE_POINTER ? (autoplayEnabled ? 36 : 45) : 60;
   const minFrameIntervalMs = 1000 / targetVisualFps;
@@ -1171,7 +1180,7 @@ state.resetRun();
 autoplayToggleEl.addEventListener('click', () => {
   audio.unlock();
   autoplayEnabled = !autoplayEnabled;
-  autoplayToggleEl.textContent = `Žaisti automatiškai: ${autoplayEnabled ? 'TAIP' : 'NE'}`;
+  renderAutoplayUiState();
 });
 
 declare global {
@@ -1229,7 +1238,7 @@ declare global {
 window.__rhythmTest = {
   setAutoplay(enabled: boolean): void {
     autoplayEnabled = enabled;
-    autoplayToggleEl.textContent = `Žaisti automatiškai: ${autoplayEnabled ? 'TAIP' : 'NE'}`;
+    renderAutoplayUiState();
   },
   resetScore(): void {
     state.resetRun();
@@ -1379,6 +1388,7 @@ void initEditor();
 wireTemplateButtons();
 wireAudioBootstrap();
 wireInputs();
+renderAutoplayUiState();
 applyGlobalWeatherTheme(rules.oroEfektas);
 renderPuzzleProgress();
 fitHudValuesToBox();
