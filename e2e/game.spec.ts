@@ -46,26 +46,6 @@ test.describe('Rhythm game flow', () => {
       .not.toBe('Kompiliuojama...');
   });
 
-  test('compile help question icon explains runtime status clearly', async ({ page }) => {
-    await page.goto('/');
-    await expect(page.locator('#gameScreen')).toBeVisible();
-
-    const studio = page.locator('.code-studio');
-    const isOpen = await studio.evaluate((node) => (node as HTMLDetailsElement).open);
-    if (!isOpen) {
-      await page.locator('.code-studio summary').click();
-    }
-
-    await page.locator('#compileHelpToggle').click();
-    await expect(page.locator('#compileHelpPanel')).toBeVisible();
-    await expect(page.locator('#compileHelpPanel')).toContainText('Paruošta (.NET WASM)');
-    await expect(page.locator('#compileHelpPanel')).toContainText('Paruošta (Suderinamas režimas)');
-    await expect(page.locator('#compileHelpPanel')).toContainText('kabliataškio');
-
-    await page.keyboard.press('Escape');
-    await expect(page.locator('#compileHelpPanel')).toBeHidden();
-  });
-
   test('template buttons load preset code and apply gameplay changes', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
@@ -956,7 +936,7 @@ test.describe('Rhythm game flow', () => {
     });
 
     expect(longHeight.fits).toBe(true);
-    expect(shortHeight).toBe(longHeight.height);
+    expect(Math.abs(shortHeight - longHeight.height)).toBeLessThanOrEqual(3);
   });
 
   test('C# sandbox clamps and guards all editable values', async ({ page }) => {

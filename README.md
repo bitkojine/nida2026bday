@@ -1,94 +1,127 @@
-# Nidos gimtadienio ritmo zaidimas (GitHub Pages static)
+# Nidos gimtadienio ritmo žaidimas (GitHub Pages, static)
 
-Mobile-first ritmo mini-zaidimas su C# taisykliu redagavimu naršyklėje. Skirtas iPhone Safari (pirminis taikinys), veikia ir desktop naršyklėse.
+Mobile-first ritmo žaidimas su gyvu C# taisyklių redagavimu naršyklėje.  
+Pirminis taikinys: iPhone Safari. Taip pat veikia desktop naršyklėse.
 
-## Dedikacija
+## Kas čia yra
 
-UI yra emocine dedikacija lietuviu kalba:
-
-- `Skirta Nidai - nuo Roberto. Su gimtadieniu! 🎉`
-- Matoma `splash` ir `start` ekranuose be scroll iPhone perziuroje.
+- 4 juostų ritmo trasa su rodyklių valdymu (`← ↓ ↑ →`)
+- C# studija žaidimo taisyklėms keisti realiu laiku
+- Mokymosi misijos (`0/5` -> `5/5`) su šablonų atrakinimo atlygiu
+- Šokantis arklys (`canvas`) su spalvų, kepurių ir oro efektų valdymu per C#
+- Lietuviška UI ir dedikacija:
+  - `Skirta Nidai – nuo Roberto. Su gimtadieniu! 🎉`
+  - rodoma žaidimo apačioje visada
 
 ## Technologijos
 
-- TypeScript (`strict`)
+- TypeScript (`strict` įjungtas)
 - Vite
-- Vitest (TDD)
-- Monaco Editor integracija
-- Browser-side C# taisykliu kompiliavimo paslauga su WASM runtime bandymu + saugus fallback
-- Canvas renderinimas (sokantis arklys)
+- Vitest + Coverage (`@vitest/coverage-v8`)
+- Playwright (desktop + iPhone profilis)
+- Monaco Editor
+- Canvas renderinimas
+- C# taisyklių vykdymas per `.NET WASM` bandymą su saugiu fallback parseriu
 
-## Paleidimas
+## Paleidimas lokaliai
 
 ```bash
 npm install
 npm run dev
 ```
 
-## Kaip zaisti
+Atidaryk adresą iš terminalo (`vite` output), dažniausiai `http://127.0.0.1:5173`.
 
-1. Palauk splash ekrano su dedikacija.
-2. Spausk `Pradeti zaidima`.
-3. Ziurek i 4 juostu trasa: natos krenta is virsaus i apatine `hit` linija.
-4. Tapsink atitinkama juosta `A S K L` tik tada, kai nata pasiekia `hit` linija.
-5. Editoriuje keisk C# reikšmes (`tobulasLangas`, `geriTaskai`, `serijaIkiUzsivedimo` ir t.t.).
-6. Stebek statusa virs editoriaus:
-   `OK (...)` reiskia, kad taisykles pritaikytos iskart zaidime.
+## Kaip žaisti
+
+1. Atidaryk žaidimą, jis startuoja iškart (be splash/start ekranų).
+2. Spausk rodyklių mygtukus apačioje (`← ↓ ↑ →`) kai nata kerta `hit` liniją.
+3. Atverk `C# studija: keisk žaidimo taisykles`.
+4. Keisk C# laukus, pvz.:
+   - `tobulasLangas`, `gerasLangas`
+   - `tobuliTaskai`, `geriTaskai`
+   - `serijaIkiUzsivedimo`
+   - `arklioSpalva`, `karciuSpalva`
+   - `suKepure`, `kepuresTipas`, `oroEfektas`
+5. Stebėk kompiliavimo būseną:
+   - `Paruošta (.NET WASM)` arba
+   - `Paruošta (Suderinamas režimas)`
+
+## Ką reiškia kompiliavimo būsena
+
+- `Paruošta (.NET WASM)` reiškia, kad C# kodas veikia per `.NET WebAssembly` naršyklėje.
+- `Paruošta (Suderinamas režimas)` reiškia, kad pilnas `.NET` vykdymas nebuvo pasiekiamas, todėl naudojamas vietinis suderinamas taisyklių vertinimas.
+- Abiem atvejais žaidimas veikia ir tavo pakeitimai taikomi iš karto.
+
+Jei matai klaidą po redagavimo:
+
+1. Patikrink, ar neužmiršai kabliataškio `;`.
+2. Patikrink, ar visi skliaustai `{ }` uždaryti poromis.
+3. Redaguok tik pažymėtą `GALI KEISTI` sritį.
+4. Po pakeitimo palauk trumpai (apie `0.1-0.2 s`), kol būsena vėl taps `Paruošta`.
 
 ## Testai
+
+### Unit + coverage
 
 ```bash
 npm run test
 ```
 
-Coverage slenkstis `>=90%` logikos moduliams (`timing`, `scoring`, `streak/boost`, `error translation`, `input normalization`, `dedication logic`).
-
-## E2E testai (lokaliai)
+### E2E
 
 ```bash
-npx playwright install chromium
+npx playwright install chromium webkit
 npm run test:e2e
 ```
 
-E2E padengia:
-
-- dedikacijos matomuma splash/start ekranuose
-- perejima i zaidima
-- kompiliavimo statuso iseima is `Kompiliuojama...`
-- mobiliam scenarijui tinkama input eiga
-
-## Build
+### Viskas (typecheck + unit + e2e)
 
 ```bash
+npm run test:all
+```
+
+## Kiti naudingi skriptai
+
+```bash
+npm run lint
+npm run format
 npm run build
 npm run preview
 ```
 
-## GitHub Pages deploy
+## GitHub Actions / Deploy
 
-1. Sukurk branch `gh-pages` arba naudok GitHub Actions.
-2. Build output yra `dist/`.
-3. Jei repo pavadinimas nera root domain, Vite `base` nustatyk i `/<repo>/`.
-4. Pushink `dist/` i Pages publish branch arba naudok Actions workflow.
+Workflow failai:
 
-## Architektura
+- `.github/workflows/deploy-pages.yml` - build + deploy į GitHub Pages
+- `.github/workflows/e2e.yml` - atskiras E2E pipeline (Chromium + WebKit)
 
-- `src/core/`: deterministine zaidimo logika.
-- `src/services/`: C# kompiliavimo/sandbox sluoksnis.
-- `src/render/`: Canvas arklio animatorius.
-- `src/ui/`: Monaco montavimas.
-- `specs/`: komponentu kontraktai (spec-driven etapas).
-- `tests/`: Vitest testai (TDD etapas).
+Deploy modelis:
 
-## Mobile performance sprendimai
+1. Push į `main` paleidžia `deploy-pages` workflow.
+2. Statinis build (`dist/`) publikuojamas per GitHub Pages Actions.
+3. E2E workflow yra atskiras ir neužblokuoja deploy artefakto generavimo.
 
-- Touch-first valdymas, be hover priklausomybiu.
-- `requestAnimationFrame` pagrindu renderinimas.
-- Canvas resize su DPR ir safe-area (`viewport-fit=cover`, `env(safe-area-inset-*)`).
-- Debounced kompiliavimas (`150ms`) kad neapkrautu iPhone CPU.
-- Lengvos CSS animacijos (`opacity/transform/text-shadow`).
+## Architektūra
+
+- `src/core/` - deterministinė ritmo/scoring/timing logika
+- `src/services/` - C# compile/runtime/fallback sluoksnis
+- `src/render/` - arklio animatorius ir efektai
+- `src/ui/` - editorius, šablonai, misijos, compile UI
+- `specs/` - spec-driven modulio kontraktai
+- `tests/` - Vitest testai
+- `e2e/` - Playwright scenarijai
+
+## Mobile-first sprendimai
+
+- Touch-first UI, be hover priklausomybės
+- Safe-area palaikymas (`viewport-fit=cover`, `env(safe-area-inset-*)`)
+- iPhone fokusavimo zoom prevencija redaktoriuje (no-zoom viewport + mobile editor font sizing)
+- `requestAnimationFrame` renderis ir lengvos animacijos
 
 ## Pastabos apie C# runtime
 
-- Integruotas WASM .NET runtime loader bandymas (`./dotnet/dotnet.js` arba CDN).
-- Jei runtime nepasiekiamas, aktyvuojamas sandboxed fallback parseris, kad zaidimas liktu static-hosting suderinamas.
+- Pirmiausia bandoma `.NET WASM` aplinka naršyklėje.
+- Jei nepavyksta, įjungiamas suderinamas fallback režimas.
+- Abiem režimais žaidimo taisyklės atsinaujina gyvai.

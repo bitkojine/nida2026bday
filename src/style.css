@@ -254,8 +254,9 @@ h1 {
   font-size: var(--fs-medium);
   line-height: 1.15;
   text-align: center;
-  white-space: normal;
-  overflow-wrap: anywhere;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: clip;
 }
 
 #judgement {
@@ -631,45 +632,6 @@ h1 {
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 8px;
-}
-
-.help-btn {
-  width: 34px;
-  height: 34px;
-  border-radius: 999px;
-  border: 1px solid rgba(95, 70, 43, 0.35);
-  background: linear-gradient(180deg, #fffef8, #f4e4c4);
-  color: #5f4a31;
-  font-weight: 800;
-  font-size: var(--fs-medium);
-  line-height: 1;
-  display: inline-grid;
-  place-items: center;
-  padding: 0;
-}
-
-.compile-help {
-  margin-top: 8px;
-  border: 1px solid rgba(130, 93, 47, 0.2);
-  border-radius: 10px;
-  background: #fffaf1;
-  padding: 10px 12px;
-  font-size: var(--fs-body);
-  color: #3d2f22;
-}
-
-.compile-help h3 {
-  margin: 0 0 6px;
-  font-size: var(--fs-medium);
-}
-
-.compile-help p {
-  margin: 0 0 8px;
-}
-
-.compile-help ol {
-  margin: 0;
-  padding-left: 18px;
 }
 
 .template-panel {

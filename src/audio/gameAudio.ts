@@ -2,6 +2,8 @@ import type { Judgement } from '../core/types';
 
 interface HoldTone {
   oscillators: OscillatorNode[];
+  shaper: WaveShaperNode;
+  lowpass: BiquadFilterNode;
   gain: GainNode;
 }
 
@@ -52,6 +54,23 @@ export class GameAudio {
   private readonly distortionCurve = createDistortionCurve(60);
 
   private readonly outputBoost = 1;
+
+  private activeTransientVoices = 0;
+
+  private readonly maxTransientVoices = 36;
+
+  private disconnectNodes(...nodes: Array<AudioNode | null | undefined>): void {
+    for (const node of nodes) {
+      if (!node) {
+        continue;
+      }
+      try {
+        node.disconnect();
+      } catch {
+        // Ignore double-disconnect and already-detached nodes.
+      }
+    }
+  }
 
   private getContext(): AudioContext | null {
     if (this.context) {
@@ -121,6 +140,10 @@ export class GameAudio {
       return;
     }
 
+    if (this.activeTransientVoices >= this.maxTransientVoices) {
+      return;
+    }
+
     const now = ctx.currentTime + whenOffsetSec;
     const osc = ctx.createOscillator();
     const shaper = ctx.createWaveShaper();
@@ -151,6 +174,11 @@ export class GameAudio {
     shaper.connect(lowpass);
     lowpass.connect(gain);
     gain.connect(this.master);
+    this.activeTransientVoices += 1;
+    osc.onended = () => {
+      this.activeTransientVoices = Math.max(0, this.activeTransientVoices - 1);
+      this.disconnectNodes(osc, shaper, lowpass, gain);
+    };
     osc.start(now);
     osc.stop(now + durationSec + 0.02);
   }
@@ -228,12 +256,18 @@ export class GameAudio {
     gain.connect(this.master);
     osc.start(now);
 
-    this.holds.set(lane, { oscillators: [osc], gain });
+    this.holds.set(lane, { oscillators: [osc], shaper, lowpass, gain });
   }
 
   stopHold(lane: number): void {
     const tone = this.holds.get(lane);
-    if (!tone || !this.context) {
+    if (!tone) {
+      return;
+    }
+    this.holds.delete(lane);
+
+    if (!this.context) {
+      this.disconnectNodes(...tone.oscillators, tone.shaper, tone.lowpass, tone.gain);
       return;
     }
 
@@ -242,9 +276,15 @@ export class GameAudio {
     tone.gain.gain.setValueAtTime(Math.max(0.0001, tone.gain.gain.value), now);
     tone.gain.gain.exponentialRampToValueAtTime(0.0001, now + 0.04);
     for (const oscillator of tone.oscillators) {
-      oscillator.stop(now + 0.05);
+      oscillator.onended = () => {
+        this.disconnectNodes(oscillator, tone.shaper, tone.lowpass, tone.gain);
+      };
+      try {
+        oscillator.stop(now + 0.05);
+      } catch {
+        this.disconnectNodes(oscillator, tone.shaper, tone.lowpass, tone.gain);
+      }
     }
-    this.holds.delete(lane);
   }
 
   stopAllHolds(): void {
@@ -287,6 +327,7 @@ export class GameAudio {
       return;
     }
     this.stopAllHolds();
+    this.activeTransientVoices = 0;
     void this.context.suspend();
     this.unlocked = false;
   }
@@ -301,6 +342,7 @@ export class GameAudio {
       return;
     }
     this.stopAllHolds();
+    this.activeTransientVoices = 0;
     this.master?.disconnect();
     void this.context.close();
     this.context = null;

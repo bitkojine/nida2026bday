@@ -67,29 +67,8 @@ app.innerHTML = `
           <span>C# studija: keisk žaidimo taisykles</span>
           <span class="compile-status-wrap">
             <span id="compileStatus">Kompiliuojama...</span>
-            <button
-              id="compileHelpToggle"
-              class="help-btn"
-              type="button"
-              aria-label="Kas tai?"
-              title="Kas tai?"
-            >
-              ?
-            </button>
           </span>
         </summary>
-        <section id="compileHelpPanel" class="compile-help" hidden>
-          <h3>Ką reiškia kompiliavimo būsena?</h3>
-          <p><strong>Paruošta (.NET WASM)</strong> reiškia, kad C# kodas veikia per .NET WebAssembly naršyklėje.</p>
-          <p><strong>Paruošta (Suderinamas režimas)</strong> reiškia, kad naršyklė nepalaikė pilno .NET vykdymo, todėl naudojamas atsarginis vietinis taisyklių vertinimas.</p>
-          <p>Abiem atvejais žaidimas veikia ir tavo pakeitimai taikomi iš karto. Jei matai klaidą:</p>
-          <ol>
-            <li>Patikrink, ar neužmiršai kabliataškio <code>;</code>.</li>
-            <li>Patikrink, ar visi skliaustai <code>{ }</code> uždaryti poromis.</li>
-            <li>Redaguok tik pažymėtą „GALI KEISTI“ sritį.</li>
-            <li>Po pakeitimo palauk trumpai (apie 0.1–0.2 s), kol būsena atsinaujins į „Paruošta“.</li>
-          </ol>
-        </section>
         <section class="editor-panel">
           <div id="editor" class="editor"></div>
         </section>
@@ -134,8 +113,6 @@ const judgementEl = requiredElement<HTMLElement>('#judgement');
 const judgementPopEl = requiredElement<HTMLElement>('#judgementPop');
 const autoplayToggleEl = requiredElement<HTMLButtonElement>('#autoplayToggle');
 const compileStatusEl = requiredElement<HTMLElement>('#compileStatus');
-const compileHelpToggleEl = requiredElement<HTMLButtonElement>('#compileHelpToggle');
-const compileHelpPanelEl = requiredElement<HTMLElement>('#compileHelpPanel');
 const puzzleProgressEl = requiredElement<HTMLElement>('#puzzleProgress');
 const puzzleStoryEl = requiredElement<HTMLElement>('#puzzleStory');
 const puzzleGoalEl = requiredElement<HTMLElement>('#puzzleGoal');
@@ -156,6 +133,8 @@ const silentAudio =
   navigator.webdriver;
 const audio = new GameAudio(silentAudio);
 const HYPE_LABEL = 'UŽSIVEDĘS';
+const HUD_VALUE_MAX_FONT_PX = 14;
+const HUD_VALUE_MIN_FONT_PX = 9;
 
 let rules: DanceRules = DEFAULT_RULES;
 let mood: HorseMood = 'GERAI';
@@ -297,52 +276,6 @@ function teardownGame(): void {
   audio.shutdown();
 }
 
-function wireCompileHelp(): void {
-  const closeHelp = (): void => {
-    compileHelpPanelEl.hidden = true;
-    compileHelpToggleEl.setAttribute('aria-expanded', 'false');
-  };
-
-  const openHelp = (): void => {
-    compileHelpPanelEl.hidden = false;
-    compileHelpToggleEl.setAttribute('aria-expanded', 'true');
-  };
-
-  compileHelpToggleEl.setAttribute('aria-expanded', 'false');
-  compileHelpToggleEl.addEventListener('click', (event) => {
-    event.preventDefault();
-    event.stopPropagation();
-    if (compileHelpPanelEl.hidden) {
-      openHelp();
-    } else {
-      closeHelp();
-    }
-  });
-
-  document.addEventListener('click', (event) => {
-    const target = event.target;
-    if (!(target instanceof Node)) {
-      return;
-    }
-
-    if (compileHelpPanelEl.hidden) {
-      return;
-    }
-
-    if (compileHelpPanelEl.contains(target) || compileHelpToggleEl.contains(target)) {
-      return;
-    }
-
-    closeHelp();
-  });
-
-  document.addEventListener('keydown', (event) => {
-    if (event.key === 'Escape') {
-      closeHelp();
-    }
-  });
-}
-
 function shouldUseSimpleEditor(): boolean {
   const touchLike = window.matchMedia('(pointer: coarse)').matches;
   const narrowScreen = window.innerWidth <= 900;
@@ -452,6 +385,27 @@ function updateHud(score: number, streak: number, judgement: string): void {
   streakEl.textContent = `${streak}`;
   multiplierEl.textContent = `x${getMultiplier(streak)}`;
   judgementEl.textContent = judgement;
+  fitHudValuesToBox();
+}
+
+function fitHudValueToBox(el: HTMLElement): void {
+  let sizePx = HUD_VALUE_MAX_FONT_PX;
+  el.style.fontSize = `${sizePx}px`;
+
+  while (
+    (el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight) &&
+    sizePx > HUD_VALUE_MIN_FONT_PX
+  ) {
+    sizePx -= 0.5;
+    el.style.fontSize = `${sizePx}px`;
+  }
+}
+
+function fitHudValuesToBox(): void {
+  fitHudValueToBox(scoreEl);
+  fitHudValueToBox(streakEl);
+  fitHudValueToBox(multiplierEl);
+  fitHudValueToBox(judgementEl);
 }
 
 function renderLanes(nowSec: number): void {
@@ -573,6 +527,7 @@ function resizeCanvas(): void {
   canvas.width = metrics.canvasWidth;
   canvas.height = metrics.canvasHeight;
   ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
+  fitHudValuesToBox();
 }
 
 resizeCanvas();
@@ -1148,11 +1103,11 @@ window.__rhythmTest = {
 void compiler.init();
 void initEditor();
 wireTemplateButtons();
-wireCompileHelp();
 wireAudioBootstrap();
 wireInputs();
 applyGlobalWeatherTheme(rules.oroEfektas);
 renderPuzzleProgress();
+fitHudValuesToBox();
 window.addEventListener('pagehide', (event) => {
   if (!event.persisted) {
     teardownGame();
