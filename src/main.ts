@@ -125,12 +125,19 @@ const editorHost = requiredElement<HTMLDivElement>('#editor');
 const state = new GameStateManager();
 const engine = new RhythmEngine(92, performance.now() / 1000, DEFAULT_SONG_MAP);
 const compiler = new CodeCompilerService();
-const audio = new GameAudio();
+const silentAudio =
+  (window as Window & { __E2E_SILENT_AUDIO__?: boolean }).__E2E_SILENT_AUDIO__ === true ||
+  new URLSearchParams(window.location.search).get('muteAudio') === '1' ||
+  navigator.webdriver;
+const audio = new GameAudio(silentAudio);
 const HYPE_LABEL = 'UŽSIVEDĘS';
 
 let rules: DanceRules = DEFAULT_RULES;
 let mood: HorseMood = 'GERAI';
 let compileTimer: number | null = null;
+let loopRafId: number | null = null;
+let audioRetryIntervalId: number | null = null;
+let disposed = false;
 let autoplayEnabled = true;
 let pendingEditorSource: string | null = null;
 let readEditorSource = (): string => pendingEditorSource ?? CSHARP_TEMPLATE;
@@ -141,6 +148,7 @@ const autoPlayedBeatIds = new Set<number>();
 const songPlayedBeatIds = new Set<number>();
 const autoHeldLanes = new Set<number>();
 const pressedLanes = new Set<number>();
+const keyHeldLanes = new Set<number>();
 
 interface ActiveHold {
   lane: number;
@@ -180,7 +188,7 @@ function wireAudioBootstrap(): void {
 
   // Retry while autoplay is active; if browser policy allows, audio starts
   // without waiting for explicit gameplay input.
-  window.setInterval(() => {
+  audioRetryIntervalId = window.setInterval(() => {
     if (!autoplayEnabled) {
       return;
     }
@@ -197,10 +205,44 @@ function wireAudioBootstrap(): void {
   window.addEventListener('mousedown', tryUnlock);
   window.addEventListener('wheel', tryUnlock, { passive: true });
   document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') {
+      audio.stopAllHolds();
+      audio.suspend();
+      return;
+    }
+
     if (document.visibilityState === 'visible') {
       tryUnlock();
     }
   });
+}
+
+function teardownGame(): void {
+  if (disposed) {
+    return;
+  }
+  disposed = true;
+
+  if (compileTimer !== null) {
+    window.clearTimeout(compileTimer);
+    compileTimer = null;
+  }
+
+  if (audioRetryIntervalId !== null) {
+    window.clearInterval(audioRetryIntervalId);
+    audioRetryIntervalId = null;
+  }
+
+  if (loopRafId !== null) {
+    window.cancelAnimationFrame(loopRafId);
+    loopRafId = null;
+  }
+
+  activeHolds.clear();
+  autoHeldLanes.clear();
+  pressedLanes.clear();
+  audio.stopAllHolds();
+  audio.shutdown();
 }
 
 function wireCompileHelp(): void {
@@ -591,6 +633,9 @@ function releaseLanePress(releaseTimeSec: number, lane: number): void {
 
 function startLoop(): void {
   const tick = (timeMs: number): void => {
+    if (disposed) {
+      return;
+    }
     const now = timeMs / 1000;
     engine.update(now);
     if (autoplayEnabled) {
@@ -643,10 +688,10 @@ function startLoop(): void {
     renderLanes(now);
     const holdingLane = activeHolds.values().next().value?.lane ?? null;
     horseAnimator.render(timeMs, mood, rules, activeHolds.size > 0, holdingLane);
-    requestAnimationFrame(tick);
+    loopRafId = requestAnimationFrame(tick);
   };
 
-  requestAnimationFrame(tick);
+  loopRafId = requestAnimationFrame(tick);
 }
 
 async function initEditor(): Promise<void> {
@@ -733,6 +778,18 @@ function wireInputs(): void {
     navigator.vibrate(12);
   };
 
+  const releasePointerLane = (lane: number): void => {
+    if (!pressedLanes.has(lane)) {
+      return;
+    }
+    if (keyHeldLanes.has(lane)) {
+      return;
+    }
+
+    pressedLanes.delete(lane);
+    releaseLanePress(performance.now() / 1000, lane);
+  };
+
   document.querySelectorAll<HTMLButtonElement>('.input-row button').forEach((button) => {
     const lane = Number(button.dataset.lane);
     button.addEventListener(
@@ -752,19 +809,11 @@ function wireInputs(): void {
     );
 
     button.addEventListener('touchend', () => {
-      if (!pressedLanes.has(lane)) {
-        return;
-      }
-      pressedLanes.delete(lane);
-      releaseLanePress(performance.now() / 1000, lane);
+      releasePointerLane(lane);
     });
 
     button.addEventListener('touchcancel', () => {
-      if (!pressedLanes.has(lane)) {
-        return;
-      }
-      pressedLanes.delete(lane);
-      releaseLanePress(performance.now() / 1000, lane);
+      releasePointerLane(lane);
     });
 
     button.addEventListener('mousedown', () => {
@@ -778,20 +827,23 @@ function wireInputs(): void {
     });
 
     button.addEventListener('mouseup', () => {
-      if (!pressedLanes.has(lane)) {
-        return;
-      }
-      pressedLanes.delete(lane);
-      releaseLanePress(performance.now() / 1000, lane);
+      releasePointerLane(lane);
     });
 
     button.addEventListener('mouseleave', () => {
-      if (!pressedLanes.has(lane)) {
-        return;
+      releasePointerLane(lane);
+    });
+  });
+
+  window.addEventListener('mouseup', () => {
+    const now = performance.now() / 1000;
+    for (const lane of Array.from(pressedLanes)) {
+      if (keyHeldLanes.has(lane)) {
+        continue;
       }
       pressedLanes.delete(lane);
-      releaseLanePress(performance.now() / 1000, lane);
-    });
+      releaseLanePress(now, lane);
+    }
   });
 
   window.addEventListener('keydown', (event) => {
@@ -809,6 +861,7 @@ function wireInputs(): void {
     if (pressedLanes.has(lane)) {
       return;
     }
+    keyHeldLanes.add(lane);
     pressedLanes.add(lane);
     pulseLaneButton(lane);
     startLanePress(performance.now() / 1000, lane);
@@ -824,6 +877,7 @@ function wireInputs(): void {
       return;
     }
 
+    keyHeldLanes.delete(lane);
     if (!pressedLanes.has(lane)) {
       return;
     }
@@ -1046,4 +1100,10 @@ wireCompileHelp();
 wireAudioBootstrap();
 wireInputs();
 applyGlobalWeatherTheme(rules.oroEfektas);
+window.addEventListener('pagehide', (event) => {
+  if (!event.persisted) {
+    teardownGame();
+  }
+});
+window.addEventListener('beforeunload', teardownGame);
 startLoop();

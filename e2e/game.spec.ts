@@ -18,6 +18,12 @@ async function updateDanceRulesCode(
 }
 
 test.describe('Rhythm game flow', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      (window as Window & { __E2E_SILENT_AUDIO__?: boolean }).__E2E_SILENT_AUDIO__ = true;
+    });
+  });
+
   test('shows dedication at bottom and game is active immediately', async ({ page }) => {
     await page.goto('/');
 

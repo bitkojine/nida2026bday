@@ -32,6 +32,8 @@ function toWaveShaperCurve(input: Float32Array): Float32Array<ArrayBuffer> {
 }
 
 export class GameAudio {
+  constructor(private readonly muted = false) {}
+
   private context: AudioContext | null = null;
 
   private master: GainNode | null = null;
@@ -77,6 +79,11 @@ export class GameAudio {
   }
 
   unlock(): void {
+    if (this.muted) {
+      this.unlocked = true;
+      return;
+    }
+
     const ctx = this.getContext();
     if (!ctx) {
       return;
@@ -86,6 +93,10 @@ export class GameAudio {
   }
 
   isUnlocked(): boolean {
+    if (this.muted) {
+      return true;
+    }
+
     const ctx = this.getContext();
     if (!ctx) {
       return false;
@@ -101,6 +112,10 @@ export class GameAudio {
     volume: number,
     whenOffsetSec = 0,
   ): void {
+    if (this.muted) {
+      return;
+    }
+
     const ctx = this.getContext();
     if (!ctx || !this.master || !this.unlocked) {
       return;
@@ -149,13 +164,18 @@ export class GameAudio {
     this.debugState.guideNotesRequested += 1;
     const duration = Math.min(0.26, 0.08 + holdDurationSec * 0.24);
     this.noteInstrument(frequency * 1.5, duration, 0.08);
-    if (this.unlocked) {
+    if (this.unlocked || this.muted) {
       this.debugState.guideNotesPlayed += 1;
     }
   }
 
   playSongBacking(frequency: number, holdDurationSec: number): void {
     this.debugState.backingNotesRequested += 1;
+    if (this.muted) {
+      this.debugState.backingNotesPlayed += 1;
+      return;
+    }
+
     if (!this.unlocked) {
       return;
     }
@@ -170,6 +190,10 @@ export class GameAudio {
   }
 
   startHold(lane: number): void {
+    if (this.muted) {
+      return;
+    }
+
     if (this.holds.has(lane)) {
       return;
     }
@@ -251,5 +275,36 @@ export class GameAudio {
     this.debugState.guideNotesPlayed = 0;
     this.debugState.backingNotesRequested = 0;
     this.debugState.backingNotesPlayed = 0;
+  }
+
+  suspend(): void {
+    if (this.muted) {
+      this.unlocked = false;
+      return;
+    }
+
+    if (!this.context) {
+      return;
+    }
+    this.stopAllHolds();
+    void this.context.suspend();
+    this.unlocked = false;
+  }
+
+  shutdown(): void {
+    if (this.muted) {
+      this.unlocked = false;
+      return;
+    }
+
+    if (!this.context) {
+      return;
+    }
+    this.stopAllHolds();
+    this.master?.disconnect();
+    void this.context.close();
+    this.context = null;
+    this.master = null;
+    this.unlocked = false;
   }
 }
