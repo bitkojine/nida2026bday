@@ -89,7 +89,7 @@ app.innerHTML = `
             </p>
           </section>
           <section id="templateReward" hidden>
-            <p class="template-title">Greiti šablonai: išbandyk kas įmanoma</p>
+            <p class="template-title">Greiti šablonai: išbandyk, kas įmanoma</p>
             <div class="template-row">
               ${DANCE_RULE_TEMPLATES.map(
                 (template) =>
@@ -100,7 +100,7 @@ app.innerHTML = `
         </section>
       </details>
       <p class="dedication dedication-footer">${DEDICATION_TEXT} 🎉</p>
-      <p class="perf-stats" id="perfStats">Našumas: kraunama...</p>
+      <p class="perf-stats" id="perfStats">Našumas: įkeliama...</p>
       <p class="build-number">Versija: ${__BUILD_VILNIUS_TIME__} (Vilnius)</p>
     </section>
   </main>

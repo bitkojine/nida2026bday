@@ -61,7 +61,8 @@ export const CODE_PUZZLES: CodePuzzle[] = [
     titleLt: '5. Gimtadienio finalas',
     storyLt:
       'Finalui arklys groja ryškiai, su karūna, ir užbaigia „Su gimtadieniu“ šventinį numerį.',
-    goalLt: 'Naudok karūną, pakeisk orą nuo SAULETA ir pasirink kitą kūno spalvą nei numatytoji.',
+    goalLt:
+      'Naudok karūną, pakeisk oro efektą iš SAULETA ir pasirink kitą kūno spalvą nei numatytoji.',
     hintLt:
       'Nustatyk `kepuresTipas = "KARUNA"`, pasirink `oroEfektas` (ne SAULETA) ir pakeisk `arklioSpalva`.',
     templateId: 'karnavaline-kepure',
