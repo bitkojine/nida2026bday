@@ -1052,7 +1052,7 @@ window.__rhythmTest = {
   playNearest(lane: number, offsetSec: number): boolean {
     const now = performance.now() / 1000;
     engine.update(now);
-    const note = engine.getBeatsInRange(now, 3).find((candidate) => candidate.lane === lane);
+    const note = engine.getBeatsInRange(now, now + 3).find((candidate) => candidate.lane === lane);
     if (!note) {
       return false;
     }
@@ -1063,7 +1063,7 @@ window.__rhythmTest = {
   playNearestAny(offsetSec: number): boolean {
     const now = performance.now() / 1000;
     engine.update(now);
-    const note = engine.getBeatsInRange(now, 3)[0];
+    const note = engine.getBeatsInRange(now, now + 3)[0];
     if (!note) {
       return false;
     }
@@ -1075,7 +1075,7 @@ window.__rhythmTest = {
     const now = performance.now() / 1000;
     engine.update(now);
     const note = engine
-      .getBeatsInRange(now, 8)
+      .getBeatsInRange(now, now + 8)
       .find((candidate) => candidate.holdDurationSec === 0);
     if (!note) {
       return false;
@@ -1092,7 +1092,7 @@ window.__rhythmTest = {
     const now = performance.now() / 1000;
     engine.update(now);
     const note = engine
-      .getBeatsInRange(now + Math.max(0, minAheadSec), 6)
+      .getBeatsInRange(now + Math.max(0, minAheadSec), now + 6)
       .find((candidate) => candidate.holdDurationSec === 0);
     return note ? { id: note.id, timeSec: note.timeSec, lane: note.lane } : null;
   },
@@ -1102,13 +1102,13 @@ window.__rhythmTest = {
   peekNearestLane(lane: number): { id: number; timeSec: number; lane: number } | null {
     const now = performance.now() / 1000;
     engine.update(now);
-    const note = engine.getBeatsInRange(now, 3).find((candidate) => candidate.lane === lane);
+    const note = engine.getBeatsInRange(now, now + 3).find((candidate) => candidate.lane === lane);
     return note ?? null;
   },
   peekNearestAny(): { id: number; timeSec: number; lane: number } | null {
     const now = performance.now() / 1000;
     engine.update(now);
-    const note = engine.getBeatsInRange(now, 3)[0];
+    const note = engine.getBeatsInRange(now, now + 3)[0];
     return note ? { id: note.id, timeSec: note.timeSec, lane: note.lane } : null;
   },
   peekNearestHold(
@@ -1117,7 +1117,7 @@ window.__rhythmTest = {
     const now = performance.now() / 1000;
     engine.update(now);
     const note = engine
-      .getBeatsInRange(now, 4)
+      .getBeatsInRange(now, now + 4)
       .find((candidate) => candidate.lane === lane && candidate.holdDurationSec > 0);
     return note ?? null;
   },
@@ -1129,7 +1129,9 @@ window.__rhythmTest = {
   } | null {
     const now = performance.now() / 1000;
     engine.update(now);
-    const note = engine.getBeatsInRange(now, 4).find((candidate) => candidate.holdDurationSec > 0);
+    const note = engine
+      .getBeatsInRange(now, now + 4)
+      .find((candidate) => candidate.holdDurationSec > 0);
     return note ?? null;
   },
   releaseLaneAt(lane: number, atSec: number): void {

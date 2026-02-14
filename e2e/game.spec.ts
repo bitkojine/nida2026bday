@@ -14,6 +14,7 @@ async function updateDanceRulesCode(
   await expect(fallback).toBeVisible();
   const current = await fallback.inputValue();
   const next = mutate(current);
+  expect(next).not.toBe(current);
   await fallback.evaluate((node, value) => {
     const textarea = node as HTMLTextAreaElement;
     textarea.value = value;
@@ -28,6 +29,32 @@ async function updateDanceRulesCode(
 function replaceRuleValue(source: string, field: string, valueLiteral: string): string {
   const matcher = new RegExp(`(public\\s+[\\w<>]+\\s+${field}\\s*=\\s*)([^;]+)(;)`);
   return source.replace(matcher, `$1${valueLiteral}$3`);
+}
+
+async function playUpcomingTapWithOffset(
+  page: import('@playwright/test').Page,
+  offsetSec: number,
+  minAheadSec = 0.12,
+) {
+  await expect
+    .poll(async () => {
+      return await page.evaluate(
+        ({ safeMinAheadSec, safeOffsetSec }) => {
+          const note = window.__rhythmTest?.peekUpcomingTapAny(safeMinAheadSec);
+          if (!note) {
+            return { ok: false, score: window.__rhythmTest?.read().score ?? 0 };
+          }
+
+          window.__rhythmTest?.playLaneAt(note.lane, note.timeSec + safeOffsetSec);
+          return { ok: true, score: window.__rhythmTest?.read().score ?? 0 };
+        },
+        {
+          safeMinAheadSec: Math.max(0, minAheadSec),
+          safeOffsetSec: offsetSec,
+        },
+      );
+    })
+    .toMatchObject({ ok: true });
 }
 
 test.describe('Rhythm game flow', () => {
@@ -479,44 +506,26 @@ test.describe('Rhythm game flow', () => {
     });
 
     await updateDanceRulesCode(page, (source) =>
-      source
-        .replace('public float tobulasLangas = 0.05f;', 'public float tobulasLangas = 0.01f;')
-        .replace('public float gerasLangas = 0.12f;', 'public float gerasLangas = 0.02f;'),
+      replaceRuleValue(replaceRuleValue(source, 'tobulasLangas', '0.01f'), 'gerasLangas', '0.02f'),
     );
 
     await expect
       .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
       .toContain('Paruošta');
 
-    await expect
-      .poll(async () => {
-        return await page.evaluate(() => {
-          const ok = window.__rhythmTest?.playNearestAny(0.05) ?? false;
-          return { ok, state: window.__rhythmTest?.read() };
-        });
-      })
-      .toMatchObject({ ok: true });
+    await playUpcomingTapWithOffset(page, 0.05);
 
     await expect(page.locator('#judgement')).toHaveText(/PRALEISTA|PER VELAI/);
 
     await updateDanceRulesCode(page, (source) =>
-      source
-        .replace('public float tobulasLangas = 0.01f;', 'public float tobulasLangas = 0.15f;')
-        .replace('public float gerasLangas = 0.02f;', 'public float gerasLangas = 0.25f;'),
+      replaceRuleValue(replaceRuleValue(source, 'tobulasLangas', '0.15f'), 'gerasLangas', '0.25f'),
     );
 
     await expect
       .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
       .toContain('Paruošta');
 
-    await expect
-      .poll(async () => {
-        return await page.evaluate(() => {
-          const ok = window.__rhythmTest?.playNearestAny(0.05) ?? false;
-          return { ok, state: window.__rhythmTest?.read() };
-        });
-      })
-      .toMatchObject({ ok: true });
+    await playUpcomingTapWithOffset(page, 0.05);
 
     await expect(page.locator('#judgement')).toHaveText(/TOBULA|GERAI|UŽSIVEDĘS/);
   });
@@ -557,34 +566,40 @@ test.describe('Rhythm game flow', () => {
     expect(before).toBeDefined();
 
     await updateDanceRulesCode(page, (source) =>
-      source
-        .replace(
-          'public string arklioSpalva = "#d6b48a";',
-          'public string arklioSpalva = "#1a8cff";',
-        )
-        .replace(
-          'public string karciuSpalva = "#7d4f2d";',
-          'public string karciuSpalva = "#f5a300";',
-        )
-        .replace('public bool suKepure = false;', 'public bool suKepure = true;')
-        .replace(
-          'public string kepuresTipas = "KLASIKINE";',
-          'public string kepuresTipas = "RAGANOS";',
-        )
-        .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "LIETINGA";'),
+      replaceRuleValue(
+        replaceRuleValue(
+          replaceRuleValue(
+            replaceRuleValue(
+              replaceRuleValue(source, 'arklioSpalva', '"#1a8cff"'),
+              'karciuSpalva',
+              '"#f5a300"',
+            ),
+            'suKepure',
+            'true',
+          ),
+          'kepuresTipas',
+          '"RAGANOS"',
+        ),
+        'oroEfektas',
+        '"LIETINGA"',
+      ),
     );
 
     await expect
       .poll(async () => (await page.locator('#compileStatus').textContent())?.trim() ?? '')
       .toContain('Paruošta');
 
-    await page.waitForTimeout(120);
-    const after = await page.evaluate(() => window.__rhythmTest?.readVisualState());
-    expect(after?.arklioSpalva).toBe('#1a8cff');
-    expect(after?.karciuSpalva).toBe('#f5a300');
-    expect(after?.suKepure).toBe(true);
-    expect(after?.kepuresTipas).toBe('RAGANOS');
-    expect(after?.oroEfektas).toBe('LIETINGA');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readVisualState() ?? null);
+      })
+      .toMatchObject({
+        arklioSpalva: '#1a8cff',
+        karciuSpalva: '#f5a300',
+        suKepure: true,
+        kepuresTipas: 'RAGANOS',
+        oroEfektas: 'LIETINGA',
+      });
     await expect(page.locator('body')).toHaveAttribute('data-weather', 'LIETINGA');
   });
 
@@ -593,26 +608,43 @@ test.describe('Rhythm game flow', () => {
     await expect(page.locator('#gameScreen')).toBeVisible();
 
     await updateDanceRulesCode(page, (source) =>
-      source
-        .replace('public float tobulasLangas = 0.05f;', 'public float tobulasLangas = 0.03f;')
-        .replace('public float gerasLangas = 0.12f;', 'public float gerasLangas = 0.15f;')
-        .replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 321;')
-        .replace('public int geriTaskai = 50;', 'public int geriTaskai = 123;')
-        .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 2;')
-        .replace(
-          'public string arklioSpalva = "#d6b48a";',
-          'public string arklioSpalva = "#3366cc";',
-        )
-        .replace(
-          'public string karciuSpalva = "#7d4f2d";',
-          'public string karciuSpalva = "#ffcc00";',
-        )
-        .replace('public bool suKepure = false;', 'public bool suKepure = true;')
-        .replace(
-          'public string kepuresTipas = "KLASIKINE";',
-          'public string kepuresTipas = "KARUNA";',
-        )
-        .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "SNIEGAS";'),
+      replaceRuleValue(
+        replaceRuleValue(
+          replaceRuleValue(
+            replaceRuleValue(
+              replaceRuleValue(
+                replaceRuleValue(
+                  replaceRuleValue(
+                    replaceRuleValue(
+                      replaceRuleValue(
+                        replaceRuleValue(source, 'tobulasLangas', '0.03f'),
+                        'gerasLangas',
+                        '0.15f',
+                      ),
+                      'tobuliTaskai',
+                      '321',
+                    ),
+                    'geriTaskai',
+                    '123',
+                  ),
+                  'serijaIkiUzsivedimo',
+                  '2',
+                ),
+                'arklioSpalva',
+                '"#3366cc"',
+              ),
+              'karciuSpalva',
+              '"#ffcc00"',
+            ),
+            'suKepure',
+            'true',
+          ),
+          'kepuresTipas',
+          '"KARUNA"',
+        ),
+        'oroEfektas',
+        '"SNIEGAS"',
+      ),
     );
 
     await expect
@@ -624,49 +656,19 @@ test.describe('Rhythm game flow', () => {
       window.__rhythmTest?.resetScore();
     });
 
-    await expect
-      .poll(async () => {
-        return await page.evaluate(() => {
-          const ok = window.__rhythmTest?.playNearestTapAny(0) ?? false;
-          return {
-            ok,
-            state: window.__rhythmTest?.read(),
-          };
-        });
-      })
-      .toMatchObject({ ok: true });
+    await playUpcomingTapWithOffset(page, 0);
 
     const firstState = await page.evaluate(() => window.__rhythmTest?.read());
     expect(firstState?.score).toBe(321);
 
-    await expect
-      .poll(async () => {
-        return await page.evaluate(() => {
-          const ok = window.__rhythmTest?.playNearestTapAny(0.1) ?? false;
-          return {
-            ok,
-            state: window.__rhythmTest?.read(),
-          };
-        });
-      })
-      .toMatchObject({ ok: true });
+    await playUpcomingTapWithOffset(page, 0.1);
 
     const secondState = await page.evaluate(() => window.__rhythmTest?.read());
     expect(['GERAI', 'UŽSIVEDĘS']).toContain(secondState?.judgement);
     expect(secondState?.score).toBe(567);
     expect(secondState?.streak).toBe(2);
 
-    await expect
-      .poll(async () => {
-        return await page.evaluate(() => {
-          const ok = window.__rhythmTest?.playNearestTapAny(0.3) ?? false;
-          return {
-            ok,
-            state: window.__rhythmTest?.read(),
-          };
-        });
-      })
-      .toMatchObject({ ok: true });
+    await playUpcomingTapWithOffset(page, 0.3);
 
     const thirdState = await page.evaluate(() => window.__rhythmTest?.read());
     expect(['PRALEISTA', 'PER VELAI']).toContain(thirdState?.judgement);
