@@ -136,6 +136,8 @@ const HYPE_LABEL = 'UŽSIVEDĘS';
 const HUD_VALUE_MAX_FONT_PX = 14;
 const HUD_VALUE_MIN_FONT_PX = 9;
 const IS_COARSE_POINTER = window.matchMedia('(pointer: coarse)').matches;
+const PUZZLE_UNLOCK_STORAGE_KEY = 'nida2026bday:puzzlesUnlocked:v1';
+const LOCAL_STORAGE_KEYS_USED = [PUZZLE_UNLOCK_STORAGE_KEY];
 
 let rules: DanceRules = DEFAULT_RULES;
 let mood: HorseMood = 'GERAI';
@@ -158,6 +160,7 @@ let readEditorSource = (): string => pendingEditorSource ?? CSHARP_TEMPLATE;
 let writeEditorSource = (next: string): void => {
   pendingEditorSource = next;
 };
+let puzzlesUnlocked = false;
 const autoPlayedBeatIds = new Set<number>();
 const songPlayedBeatIds = new Set<number>();
 const autoHeldLanes = new Set<number>();
@@ -193,11 +196,59 @@ function setRules(next: DanceRules): void {
   renderPuzzleProgress();
 }
 
+function readPuzzlesUnlocked(): boolean {
+  try {
+    return window.localStorage.getItem(PUZZLE_UNLOCK_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writePuzzlesUnlocked(next: boolean): void {
+  puzzlesUnlocked = next;
+  try {
+    if (next) {
+      window.localStorage.setItem(PUZZLE_UNLOCK_STORAGE_KEY, '1');
+    } else {
+      window.localStorage.removeItem(PUZZLE_UNLOCK_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage failures; gameplay still works in-memory.
+  }
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#39;');
+}
+
+function formatInlineCode(value: string): string {
+  const parts = value.split(/`([^`]+)`/g);
+  return parts
+    .map((part, index) => {
+      if (index % 2 === 1) {
+        return `<code>${escapeHtml(part)}</code>`;
+      }
+      return escapeHtml(part);
+    })
+    .join('');
+}
+
 function renderPuzzleProgress(): void {
   const progress = evaluatePuzzleProgress(rules, readEditorSource());
+  if (!puzzlesUnlocked && progress.nextPuzzle === null) {
+    writePuzzlesUnlocked(true);
+  }
+  const isUnlocked = puzzlesUnlocked;
   const nextPuzzle = progress.nextPuzzle;
-  puzzleProgressEl.textContent = `${progress.solvedCount} / ${progress.totalCount}`;
-  const allSolved = nextPuzzle === null;
+  puzzleProgressEl.textContent = isUnlocked
+    ? `${progress.totalCount} / ${progress.totalCount}`
+    : `${progress.solvedCount} / ${progress.totalCount}`;
+  const allSolved = isUnlocked || nextPuzzle === null;
   templateRewardEl.hidden = !allSolved;
   templateLockNoteEl.hidden = allSolved;
 
@@ -215,7 +266,7 @@ function renderPuzzleProgress(): void {
 
   puzzleStoryEl.textContent = `${nextPuzzle.titleLt}: ${nextPuzzle.storyLt}`;
   puzzleGoalEl.textContent = `Tikslas: ${nextPuzzle.goalLt}`;
-  puzzleHintEl.textContent = `💡 Užuomina: ${nextPuzzle.hintLt}`;
+  puzzleHintEl.innerHTML = formatInlineCode(`💡 Užuomina: ${nextPuzzle.hintLt}`);
   puzzleDoneEl.hidden = true;
 }
 
@@ -540,6 +591,7 @@ function updatePerformanceStats(nowMs: number): void {
     `Garso balsai: ${audioStats.activeTransientVoices}`,
     `Laikomos natos: ${audioStats.activeHoldVoices}`,
     `Vizualo riba: ${visualCap} kadr./s`,
+    `Vietinė saugykla (localStorage): ${LOCAL_STORAGE_KEYS_USED.join(', ')}`,
   ].join('\n');
 
   perfWindowStartMs = nowMs;
@@ -1222,6 +1274,7 @@ window.__rhythmTest = {
 };
 
 void compiler.init();
+puzzlesUnlocked = readPuzzlesUnlocked();
 void initEditor();
 wireTemplateButtons();
 wireAudioBootstrap();
