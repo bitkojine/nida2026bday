@@ -10,12 +10,13 @@ export interface CodeEditor {
 export async function mountMonacoEditor(el: HTMLElement, initial: string): Promise<CodeEditor> {
   loader.config({ monaco });
   const monacoApi = await loader.init();
+  const isTouchViewport = window.matchMedia('(pointer: coarse)').matches;
 
   const editor = monacoApi.editor.create(el, {
     value: initial,
     language: 'csharp',
     theme: 'vs',
-    fontSize: 11,
+    fontSize: isTouchViewport ? 16 : 11,
     minimap: { enabled: false },
     scrollBeyondLastLine: false,
     automaticLayout: true,
