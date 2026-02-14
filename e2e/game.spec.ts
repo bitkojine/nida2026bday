@@ -451,13 +451,7 @@ test.describe('Rhythm game flow', () => {
     expect(box.width).toBeLessThanOrEqual(viewport.width);
   });
 
-  test('fits iPhone landscape viewport without horizontal overflow', async ({
-    page,
-    browserName,
-  }) => {
-    if (browserName !== 'webkit') {
-      return;
-    }
+  test('fits iPhone landscape viewport without horizontal overflow', async ({ page }) => {
     await page.setViewportSize({ width: 844, height: 390 });
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
@@ -488,13 +482,7 @@ test.describe('Rhythm game flow', () => {
     expect(layout.gameWidth).toBeLessThanOrEqual(viewportWidth + 1);
   });
 
-  test('fits desktop landscape viewport without horizontal overflow', async ({
-    page,
-    browserName,
-  }) => {
-    if (browserName === 'webkit') {
-      return;
-    }
+  test('fits desktop landscape viewport without horizontal overflow', async ({ page }) => {
     await page.setViewportSize({ width: 1366, height: 768 });
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();

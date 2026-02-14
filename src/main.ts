@@ -7,6 +7,7 @@ import { buildLayoutMetrics } from './core/layoutManager';
 import { computeNoteYPercent } from './core/noteLayout';
 import type { HitEvaluation } from './core/rhythmEngine';
 import { RhythmEngine } from './core/rhythmEngine';
+import { planSongPlaybackBatch } from './core/songPlaybackPlanner';
 import { DEFAULT_SONG_MAP } from './core/songMap';
 import { DEFAULT_RULES, type DanceRules, type HorseMood, type Judgement } from './core/types';
 import { HorseAnimator } from './render/horseAnimator';
@@ -16,6 +17,7 @@ import { applyCompileResult, wireFallbackCompiler } from './ui/compileFeedback';
 import { evaluatePuzzleProgress } from './ui/codePuzzles';
 import { applyDanceRuleTemplate, DANCE_RULE_TEMPLATES } from './ui/danceRuleTemplates';
 import { highlightCSharp } from './ui/fallbackSyntaxHighlighter';
+import { bindAudioBootstrapBindings, bindSimpleEditorResizeBindings } from './ui/lifecycleBindings';
 import { buildWrappedLineNumbers } from './ui/lineNumberGutter';
 import { mountMonacoEditor } from './ui/monacoEditor';
 
@@ -165,9 +167,15 @@ let readEditorSource = (): string => pendingEditorSource ?? CSHARP_TEMPLATE;
 let writeEditorSource = (next: string): void => {
   pendingEditorSource = next;
 };
+let cleanupAudioBootstrapBindings: (() => void) | null = null;
+let cleanupSimpleEditorResizeBindings: (() => void) | null = null;
 let puzzlesUnlocked = false;
 const autoPlayedBeatIds = new Set<number>();
 const songPlayedBeatIds = new Set<number>();
+const pendingSongBeats = new Map<
+  number,
+  { id: number; timeSec: number; toneHz: number; holdDurationSec: number }
+>();
 const autoHeldLanes = new Set<number>();
 const pressedLanes = new Set<number>();
 const keyHeldLanes = new Set<number>();
@@ -276,6 +284,13 @@ function renderPuzzleProgress(): void {
 }
 
 function wireAudioBootstrap(): void {
+  if (audioRetryIntervalId !== null) {
+    window.clearInterval(audioRetryIntervalId);
+    audioRetryIntervalId = null;
+  }
+  cleanupAudioBootstrapBindings?.();
+  cleanupAudioBootstrapBindings = null;
+
   const tryUnlock = (): void => {
     audio.unlock();
   };
@@ -296,21 +311,17 @@ function wireAudioBootstrap(): void {
   }, 900);
 
   // Policy-safe recovery hooks for browsers that require any user gesture.
-  window.addEventListener('pointerdown', tryUnlock, { passive: true });
-  window.addEventListener('keydown', tryUnlock);
-  window.addEventListener('touchstart', tryUnlock, { passive: true });
-  window.addEventListener('mousedown', tryUnlock);
-  window.addEventListener('wheel', tryUnlock, { passive: true });
-  document.addEventListener('visibilitychange', () => {
-    if (document.visibilityState === 'hidden') {
+  cleanupAudioBootstrapBindings = bindAudioBootstrapBindings({
+    win: window,
+    doc: document,
+    tryUnlock,
+    onHidden: () => {
       audio.stopAllHolds();
       audio.suspend();
-      return;
-    }
-
-    if (document.visibilityState === 'visible') {
+    },
+    onVisible: () => {
       tryUnlock();
-    }
+    },
   });
 }
 
@@ -329,6 +340,10 @@ function teardownGame(): void {
     window.clearInterval(audioRetryIntervalId);
     audioRetryIntervalId = null;
   }
+  cleanupAudioBootstrapBindings?.();
+  cleanupAudioBootstrapBindings = null;
+  cleanupSimpleEditorResizeBindings?.();
+  cleanupSimpleEditorResizeBindings = null;
 
   if (loopRafId !== null) {
     window.cancelAnimationFrame(loopRafId);
@@ -337,6 +352,7 @@ function teardownGame(): void {
 
   activeHolds.clear();
   autoHeldLanes.clear();
+  pendingSongBeats.clear();
   pressedLanes.clear();
   audio.stopAllHolds();
   audio.shutdown();
@@ -437,13 +453,13 @@ function mountSimpleEditor(): void {
     },
     { passive: true },
   );
-  window.addEventListener('resize', syncLines, { passive: true });
-  if (typeof ResizeObserver !== 'undefined') {
-    const resizeObserver = new ResizeObserver(() => {
-      syncLines();
-    });
-    resizeObserver.observe(fallback);
-  }
+  cleanupSimpleEditorResizeBindings?.();
+  cleanupSimpleEditorResizeBindings = bindSimpleEditorResizeBindings({
+    win: window,
+    fallback,
+    syncLines,
+    ResizeObserverCtor: typeof ResizeObserver !== 'undefined' ? ResizeObserver : undefined,
+  });
 }
 
 function wireTemplateButtons(): void {
@@ -943,19 +959,30 @@ function startLoop(): void {
     const songLookBehindSec = Math.max(0.18, frameDeltaSec * 2.2);
     const songLookAheadSec = Math.max(0.06, frameDeltaSec * 0.65);
     const songNotes = engine.getBeatsInRange(now - songLookBehindSec, now + songLookAheadSec, true);
-    for (const note of songNotes) {
-      if (songPlayedBeatIds.has(note.id)) {
+    const audioUnlocked = audio.isUnlocked();
+    const playbackPlan = planSongPlaybackBatch({
+      nowSec: now,
+      unlocked: audioUnlocked,
+      windowBeats: songNotes,
+      pendingBeats: Array.from(pendingSongBeats.values()),
+      playedBeatIds: songPlayedBeatIds,
+      maxPendingAgeSec: 1.2,
+      maxPendingCount: 24,
+    });
+    pendingSongBeats.clear();
+    for (const beat of playbackPlan.pending) {
+      pendingSongBeats.set(beat.id, beat);
+    }
+    if (!audioUnlocked && playbackPlan.pending.length > 0) {
+      audio.unlock();
+    }
+    for (const beat of playbackPlan.toPlay) {
+      if (songPlayedBeatIds.has(beat.id)) {
         continue;
       }
-
-      if (!audio.isUnlocked()) {
-        audio.unlock();
-        continue;
-      }
-
-      songPlayedBeatIds.add(note.id);
-      audio.playSongGuideNote(note.toneHz, note.holdDurationSec);
-      audio.playSongBacking(note.toneHz, note.holdDurationSec);
+      songPlayedBeatIds.add(beat.id);
+      audio.playSongGuideNote(beat.toneHz, beat.holdDurationSec);
+      audio.playSongBacking(beat.toneHz, beat.holdDurationSec);
     }
 
     for (const [lane, hold] of activeHolds) {
@@ -1244,6 +1271,7 @@ window.__rhythmTest = {
     state.resetRun();
     autoPlayedBeatIds.clear();
     songPlayedBeatIds.clear();
+    pendingSongBeats.clear();
     autoHeldLanes.clear();
     audio.stopAllHolds();
     audio.resetDebugState();
