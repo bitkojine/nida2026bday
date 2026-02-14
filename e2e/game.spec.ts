@@ -455,8 +455,47 @@ test.describe('Rhythm game flow', () => {
     page,
     browserName,
   }) => {
-    test.skip(browserName !== 'webkit', 'Landscape iPhone behavior is validated on WebKit profile');
+    if (browserName !== 'webkit') {
+      return;
+    }
     await page.setViewportSize({ width: 844, height: 390 });
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    const layout = await page.evaluate(() => {
+      const game = document.querySelector<HTMLElement>('#gameScreen');
+      if (!game) {
+        return { ok: false };
+      }
+
+      const rect = game.getBoundingClientRect();
+      const viewportWidth = window.innerWidth;
+      const html = document.documentElement;
+      return {
+        ok: true,
+        viewportWidth,
+        gameWidth: rect.width,
+        hasOverflow: html.scrollWidth > viewportWidth + 1,
+      };
+    });
+
+    expect(layout.ok).toBe(true);
+    if (!layout.ok) {
+      return;
+    }
+    const viewportWidth = layout.viewportWidth ?? 0;
+    expect(layout.hasOverflow).toBe(false);
+    expect(layout.gameWidth).toBeLessThanOrEqual(viewportWidth + 1);
+  });
+
+  test('fits desktop landscape viewport without horizontal overflow', async ({
+    page,
+    browserName,
+  }) => {
+    if (browserName === 'webkit') {
+      return;
+    }
+    await page.setViewportSize({ width: 1366, height: 768 });
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
 
