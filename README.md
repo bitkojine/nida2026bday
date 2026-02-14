@@ -7,7 +7,7 @@ Pirminis taikinys: iPhone Safari. Taip pat veikia desktop naršyklėse.
 
 - 4 juostų ritmo trasa su rodyklių valdymu (`← ↓ ↑ →`)
 - C# studija žaidimo taisyklėms keisti realiu laiku
-- Mokymosi misijos (`0/5` -> `5/5`) su šablonų atrakinimo atlygiu
+- Mokymosi misijos (`0/5` -> `5/5`) su nuolat išsaugomu šablonų atrakinimo atlygiu
 - Šokantis arklys (`canvas`) su spalvų, kepurių ir oro efektų valdymu per C#
 - Gyvi našumo rodikliai poraštėje (lietuviški: `kadr./s`, `ms`, atmintis, garso balsai, dalelės)
 - Lietuviška UI ir dedikacija:
@@ -45,6 +45,12 @@ Atidaryk adresą iš terminalo (`vite` output), dažniausiai `http://127.0.0.1:5
    - `arklioSpalva`, `karciuSpalva`
    - `suKepure`, `kepuresTipas`, `oroEfektas`
 5. Pakeitimai pritaikomi automatiškai po trumpos akimirkos.
+
+### Misijos ir atlygis
+
+- Misijų kortelė visada rodoma virš C# redaktoriaus.
+- Įvykdžius visas 5 misijas, atrakini C# šablonų mygtukus.
+- Atrakinta būsena išsaugoma naršyklės `localStorage` rakte `nida2026bday:puzzlesUnlocked:v1`, todėl šablonai lieka atrakinti ir po puslapio perkrovimo.
 
 Jei matai klaidą po redagavimo:
 
@@ -102,6 +108,13 @@ Deploy modelis:
 - Home Screen pavadinimas: `Arklio Ritmas`.
 - Naudojama brandinta ikona iš `public/icons/`.
 
+## Poraštė ir diagnostika
+
+- Poraštėje rodoma papildoma informacija apie žaidimą ir našumą (lietuviškai, po vieną rodiklį eilutėje, kad išdėstymas nešokinėtų).
+- Rodomas build numeris pagal Lietuvos laiką.
+- Jei atminties API naršyklėje neprieinama, rodomas tekstas `neprieinama`.
+- Rodoma, kokie `localStorage` raktai naudojami (dev diagnostikai).
+
 ## Architektūra
 
 - `src/core/` - deterministinė ritmo/scoring/timing logika
@@ -129,3 +142,4 @@ Deploy modelis:
 - Pirmiausia bandoma `.NET WASM` aplinka naršyklėje.
 - Jei nepavyksta, įjungiamas suderinamas fallback režimas.
 - Abiem režimais žaidimo taisyklės atsinaujina gyvai.
+- Runtime režimo detalės žaidimo UI nebenerodomos (palikta kaip techninė informacija README faile).
