@@ -448,6 +448,9 @@ function applyJudgement(judgement: Judgement, displayJudgement: string, lane: nu
   scoreEl.textContent = `${next.score}`;
   updateHud(next.score, next.streak, mood === 'UZSIVEDIMAS' ? HYPE_LABEL : displayJudgement);
   showJudgementFeedback(judgement, displayJudgement, lane);
+  if (judgement === 'TOBULA') {
+    horseAnimator.emitPerfectNotes(lane);
+  }
   audio.onJudgement(judgement, { hypeStart, streakMilestone, lane });
 }
 
@@ -579,7 +582,8 @@ function startLoop(): void {
       applyJudgement('PRALEISTA', 'PRALEISTA', null);
     }
     renderLanes(now);
-    horseAnimator.render(timeMs, mood, rules);
+    const holdingLane = activeHolds.values().next().value?.lane ?? null;
+    horseAnimator.render(timeMs, mood, rules, activeHolds.size > 0, holdingLane);
     requestAnimationFrame(tick);
   };
 

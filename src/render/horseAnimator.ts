@@ -12,6 +12,22 @@ function getLogicalCanvasSize(
 }
 
 export class HorseAnimator {
+  private noteParticles: Array<{
+    x: number;
+    y: number;
+    vx: number;
+    vy: number;
+    lifeSec: number;
+    maxLifeSec: number;
+    glyph: '♪' | '♫';
+    spin: number;
+    lane: number | null;
+  }> = [];
+
+  private lastFrameSec: number | null = null;
+
+  private lastPerfectEmitSec = -10;
+
   private lastVisualState: {
     arklioSpalva: string;
     karciuSpalva: string;
@@ -28,6 +44,51 @@ export class HorseAnimator {
 
   constructor(private readonly ctx: CanvasRenderingContext2D) {}
 
+  private getLaneGlowPalette(lane: number | null): {
+    shadow: string;
+    auraStroke: string;
+    auraInner: string;
+    stream: string;
+  } {
+    switch (lane) {
+      case 0:
+        return {
+          shadow: '#ff8f82',
+          auraStroke: 'rgba(255, 136, 122, 0.98)',
+          auraInner: 'rgba(255, 172, 158, 0.94)',
+          stream: 'rgba(255, 207, 200, 0.98)',
+        };
+      case 1:
+        return {
+          shadow: '#ffd564',
+          auraStroke: 'rgba(255, 213, 100, 0.98)',
+          auraInner: 'rgba(255, 229, 151, 0.95)',
+          stream: 'rgba(255, 241, 197, 0.98)',
+        };
+      case 2:
+        return {
+          shadow: '#63a6ff',
+          auraStroke: 'rgba(99, 166, 255, 0.98)',
+          auraInner: 'rgba(162, 205, 255, 0.95)',
+          stream: 'rgba(214, 232, 255, 0.98)',
+        };
+      case 3:
+        return {
+          shadow: '#76d97e',
+          auraStroke: 'rgba(118, 217, 126, 0.98)',
+          auraInner: 'rgba(179, 236, 185, 0.95)',
+          stream: 'rgba(224, 248, 226, 0.98)',
+        };
+      default:
+        return {
+          shadow: '#7fe4ff',
+          auraStroke: 'rgba(152, 228, 255, 0.98)',
+          auraInner: 'rgba(151, 229, 255, 0.95)',
+          stream: 'rgba(208, 244, 255, 0.98)',
+        };
+    }
+  }
+
   getVisualState(): {
     arklioSpalva: string;
     karciuSpalva: string;
@@ -36,6 +97,114 @@ export class HorseAnimator {
     mood: HorseMood;
   } {
     return { ...this.lastVisualState };
+  }
+
+  emitPerfectNotes(lane: number | null): void {
+    const nowSec = this.lastFrameSec ?? performance.now() / 1000;
+    const sinceLast = nowSec - this.lastPerfectEmitSec;
+    const burstCount = sinceLast < 0.22 ? 2 : 4;
+    this.lastPerfectEmitSec = nowSec;
+
+    for (let i = 0; i < burstCount; i += 1) {
+      const speed = 38 + Math.random() * 34;
+      const angle = -0.52 + Math.random() * 0.5;
+      this.noteParticles.push({
+        x: 104 + Math.random() * 6,
+        y: -28 + (Math.random() - 0.5) * 8,
+        vx: Math.cos(angle) * speed + 20,
+        vy: Math.sin(angle) * speed - 12,
+        lifeSec: 1.15 + Math.random() * 0.45,
+        maxLifeSec: 1.15 + Math.random() * 0.45,
+        glyph: Math.random() > 0.55 ? '♫' : '♪',
+        spin: (Math.random() - 0.5) * 1.8,
+        lane,
+      });
+    }
+
+    if (this.noteParticles.length > 42) {
+      this.noteParticles.splice(0, this.noteParticles.length - 42);
+    }
+  }
+
+  private drawNoteParticles(
+    dtSec: number,
+    mood: HorseMood,
+    isHolding: boolean,
+    holdingLane: number | null,
+  ): void {
+    const holdPalette = this.getLaneGlowPalette(holdingLane);
+    if (isHolding && Math.random() < 0.08) {
+      this.noteParticles.push({
+        x: 106 + Math.random() * 3,
+        y: -27 + (Math.random() - 0.5) * 4,
+        vx: 42 + Math.random() * 16,
+        vy: -10 - Math.random() * 9,
+        lifeSec: 0.55 + Math.random() * 0.25,
+        maxLifeSec: 0.55 + Math.random() * 0.25,
+        glyph: Math.random() > 0.6 ? '♫' : '♪',
+        spin: (Math.random() - 0.5) * 1.2,
+        lane: holdingLane,
+      });
+    }
+
+    if (this.noteParticles.length === 0) {
+      return;
+    }
+
+    this.ctx.save();
+    this.ctx.textAlign = 'center';
+    this.ctx.textBaseline = 'middle';
+    this.ctx.font = '700 16px "Space Grotesk", sans-serif';
+
+    const survivors: typeof this.noteParticles = [];
+    for (const particle of this.noteParticles) {
+      const lifeLeft = particle.lifeSec - dtSec;
+      if (lifeLeft <= 0) {
+        continue;
+      }
+
+      const fade = Math.max(0, Math.min(1, lifeLeft / particle.maxLifeSec));
+      particle.lifeSec = lifeLeft;
+      particle.x += particle.vx * dtSec;
+      particle.y += particle.vy * dtSec;
+      particle.vx *= 0.995;
+      particle.vy -= 12 * dtSec;
+      particle.vy *= 0.985;
+
+      const particlePalette = this.getLaneGlowPalette(particle.lane);
+      const accent =
+        particle.lane !== null
+          ? particlePalette.auraInner
+          : isHolding
+            ? holdPalette.auraInner
+            : mood === 'UZSIVEDIMAS'
+              ? '#ffe08a'
+              : '#fff6d7';
+      const outline =
+        particle.lane !== null
+          ? 'rgba(37, 29, 20, 0.72)'
+          : isHolding
+            ? 'rgba(44, 32, 20, 0.72)'
+            : mood === 'UZSIVEDIMAS'
+              ? '#8d4b00'
+              : '#72522c';
+
+      this.ctx.save();
+      this.ctx.globalAlpha = fade;
+      this.ctx.translate(particle.x, particle.y);
+      this.ctx.rotate((1 - fade) * particle.spin);
+      this.ctx.strokeStyle = outline;
+      this.ctx.lineWidth = 2.1;
+      this.ctx.strokeText(particle.glyph, 0, 0);
+      this.ctx.fillStyle = accent;
+      this.ctx.fillText(particle.glyph, 0, 0);
+      this.ctx.restore();
+
+      survivors.push(particle);
+    }
+
+    this.noteParticles = survivors;
+    this.ctx.restore();
   }
 
   private drawEnvironment(t: number, w: number, h: number, rules: DanceRules): void {
@@ -150,13 +319,24 @@ export class HorseAnimator {
     this.ctx.restore();
   }
 
-  render(timeMs: number, mood: HorseMood, rules: DanceRules): void {
+  render(
+    timeMs: number,
+    mood: HorseMood,
+    rules: DanceRules,
+    isHolding = false,
+    holdingLane: number | null = null,
+  ): void {
     const { canvas } = this.ctx;
     const scaleX = Math.max(1, this.ctx.getTransform().a || 1);
     const logical = getLogicalCanvasSize(canvas, scaleX);
     const w = logical.width;
     const h = logical.height;
     const t = timeMs / 1000;
+    const dtSec =
+      this.lastFrameSec === null
+        ? 1 / 60
+        : Math.max(1 / 240, Math.min(1 / 30, t - this.lastFrameSec));
+    this.lastFrameSec = t;
     this.lastVisualState = {
       arklioSpalva: rules.arklioSpalva,
       karciuSpalva: rules.karciuSpalva,
@@ -177,13 +357,23 @@ export class HorseAnimator {
     const amp = fitScale;
     const centerX = w * 0.5;
     const centerY = h * 0.46;
-    const dance = Math.sin(t * 8) * 8 * amp;
+    const holdPulse = Math.sin(t * 13) * 2.2 * amp;
+    const dance = isHolding ? holdPulse : Math.sin(t * 8) * 8 * amp;
     const stumble = mood === 'PRALEISTA' ? Math.sin(t * 18) * 14 * amp : 0;
     const boost = mood === 'UZSIVEDIMAS' ? 1.16 : 1;
+    const holdPalette = this.getLaneGlowPalette(holdingLane);
 
-    if (mood === 'TOBULA' || mood === 'UZSIVEDIMAS') {
-      this.ctx.shadowBlur = mood === 'UZSIVEDIMAS' ? 30 : 16;
-      this.ctx.shadowColor = '#ffd166';
+    if (mood === 'UZSIVEDIMAS' || mood === 'TOBULA' || isHolding) {
+      if (mood === 'UZSIVEDIMAS') {
+        this.ctx.shadowBlur = 30;
+        this.ctx.shadowColor = '#ffd166';
+      } else if (isHolding) {
+        this.ctx.shadowBlur = 34;
+        this.ctx.shadowColor = holdPalette.shadow;
+      } else {
+        this.ctx.shadowBlur = 16;
+        this.ctx.shadowColor = '#ffd166';
+      }
     } else {
       this.ctx.shadowBlur = 0;
     }
@@ -192,8 +382,53 @@ export class HorseAnimator {
     this.ctx.translate(centerX + stumble, centerY + dance);
     this.ctx.scale(boost * fitScale, boost * fitScale);
 
+    if (isHolding) {
+      const pulse = (Math.sin(t * 11) + 1) * 0.5;
+      const pulse2 = (Math.sin(t * 9 + 0.9) + 1) * 0.5;
+
+      this.ctx.save();
+      this.ctx.globalAlpha = 0.32 + pulse * 0.26;
+      this.ctx.strokeStyle = holdPalette.auraStroke;
+      this.ctx.lineWidth = 3.8;
+      this.ctx.beginPath();
+      this.ctx.ellipse(2, -2, 95 + pulse * 12, 43 + pulse * 8, 0, 0, Math.PI * 2);
+      this.ctx.stroke();
+
+      this.ctx.globalAlpha = 0.2 + pulse2 * 0.22;
+      this.ctx.strokeStyle = holdPalette.stream;
+      this.ctx.lineWidth = 2.8;
+      this.ctx.beginPath();
+      this.ctx.ellipse(6, -3, 106 + pulse2 * 14, 51 + pulse2 * 8, 0, 0, Math.PI * 2);
+      this.ctx.stroke();
+
+      this.ctx.globalAlpha = 0.16 + pulse * 0.18;
+      this.ctx.fillStyle = holdPalette.auraInner;
+      this.ctx.beginPath();
+      this.ctx.ellipse(2, -4, 84 + pulse * 8, 31 + pulse * 5, 0, 0, Math.PI * 2);
+      this.ctx.fill();
+
+      this.ctx.globalAlpha = 0.56 + pulse * 0.28;
+      this.ctx.strokeStyle = holdPalette.stream;
+      this.ctx.lineWidth = 3;
+      this.ctx.beginPath();
+      this.ctx.moveTo(108, -27);
+      this.ctx.quadraticCurveTo(
+        127 + pulse * 8,
+        -38 - pulse * 5,
+        149 + pulse * 11,
+        -17 + pulse * 5,
+      );
+      this.ctx.stroke();
+      this.ctx.restore();
+    }
+
     this.ctx.fillStyle = rules.arklioSpalva;
     this.ctx.fillRect(-68, -26, 136, 52);
+
+    if (isHolding) {
+      this.ctx.fillStyle = 'rgba(255, 237, 173, 0.4)';
+      this.ctx.fillRect(-72, -30, 144, 60);
+    }
 
     const tailBaseX = -68;
     const tailBaseY = -8;
@@ -212,17 +447,52 @@ export class HorseAnimator {
     );
     this.ctx.stroke();
 
+    const neckBob = 0;
     this.ctx.fillStyle = '#c79f76';
-    this.ctx.fillRect(50, -46, 30, 40);
+    this.ctx.fillRect(50, -46 + neckBob, 30, 40);
     this.ctx.fillRect(65, -53, 14, 12);
     this.ctx.fillRect(80, -40, 26, 26);
     this.ctx.fillRect(100, -35, 10, 16);
 
+    // Funny googly eye for a playful horse expression.
+    const eyeCenterX = 70;
+    const eyeCenterY = -28 + neckBob * 0.25;
+    const eyeRadius = 8.5;
+    const pupilRadius = mood === 'PRALEISTA' ? 3.8 : 3.2;
+    const wobbleStrength = isHolding ? 1 : 0.32;
+    const wobbleX =
+      (Math.sin(t * 12 + (isHolding ? 1.1 : 0)) * 2.1 + Math.sin(t * 21) * 0.9) * wobbleStrength;
+    const wobbleY =
+      (Math.cos(t * 9 + (mood === 'UZSIVEDIMAS' ? 1.7 : 0.4)) * 1.8 + Math.sin(t * 16) * 0.5) *
+      wobbleStrength;
+    this.ctx.fillStyle = '#fffdf7';
+    this.ctx.beginPath();
+    this.ctx.arc(eyeCenterX, eyeCenterY, eyeRadius, 0, Math.PI * 2);
+    this.ctx.fill();
+    this.ctx.strokeStyle = '#5a4228';
+    this.ctx.lineWidth = 1.8;
+    this.ctx.stroke();
+    this.ctx.fillStyle = '#2b1f12';
+    this.ctx.beginPath();
+    this.ctx.arc(
+      eyeCenterX + Math.max(-2.6, Math.min(2.6, wobbleX)),
+      eyeCenterY + Math.max(-2.6, Math.min(2.6, wobbleY)),
+      pupilRadius,
+      0,
+      Math.PI * 2,
+    );
+    this.ctx.fill();
+    this.ctx.fillStyle = 'rgba(255, 255, 255, 0.75)';
+    this.ctx.beginPath();
+    this.ctx.arc(eyeCenterX + 1.2, eyeCenterY - 1.6, 1.4, 0, Math.PI * 2);
+    this.ctx.fill();
+
+    const legSwing = isHolding ? Math.sin(t * 12) * 4 : Math.sin(t * 8) * 6;
     this.ctx.fillStyle = rules.karciuSpalva;
-    this.ctx.fillRect(-50, 24, 14, 46 + Math.sin(t * 8) * 6);
-    this.ctx.fillRect(-10, 24, 14, 46 - Math.sin(t * 8) * 6);
-    this.ctx.fillRect(20, 24, 14, 46 + Math.sin(t * 8) * 6);
-    this.ctx.fillRect(52, 24, 14, 46 - Math.sin(t * 8) * 6);
+    this.ctx.fillRect(-50, 24, 14, 46 + legSwing);
+    this.ctx.fillRect(-10, 24, 14, 46 - legSwing);
+    this.ctx.fillRect(20, 24, 14, 46 + legSwing);
+    this.ctx.fillRect(52, 24, 14, 46 - legSwing);
 
     if (rules.suKepure) {
       this.ctx.fillStyle = '#2d3a63';
@@ -230,6 +500,8 @@ export class HorseAnimator {
       this.ctx.fillRect(56, -77, 22, 14);
       this.ctx.fillRect(82, -62, 20, 6);
     }
+
+    this.drawNoteParticles(dtSec, mood, isHolding, holdingLane);
 
     this.ctx.restore();
     this.ctx.restore();
