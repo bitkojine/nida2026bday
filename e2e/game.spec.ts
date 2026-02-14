@@ -489,11 +489,24 @@ test.describe('Rhythm game flow', () => {
   test('changing C# points changes real scoring speed', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
-    const score = page.locator('#score');
-    const baseStart = Number((await score.textContent()) ?? '0');
-    await page.waitForTimeout(1800);
-    const baseEnd = Number((await score.textContent()) ?? '0');
-    const baseDelta = baseEnd - baseStart;
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(false);
+      window.__rhythmTest?.resetScore();
+    });
+
+    const baseState = await page.evaluate(() => {
+      const tap = window.__rhythmTest?.peekUpcomingTapAny(0.35);
+      if (!tap) {
+        return { ok: false, score: 0 };
+      }
+      window.__rhythmTest?.playLaneAt(tap.lane, tap.timeSec);
+      return {
+        ok: true,
+        score: window.__rhythmTest?.read().score ?? 0,
+      };
+    });
+    expect(baseState.ok).toBe(true);
+    const baseDelta = baseState.score;
     expect(baseDelta).toBeGreaterThan(0);
 
     await updateDanceRulesCode(page, (source) =>
@@ -501,12 +514,21 @@ test.describe('Rhythm game flow', () => {
         .replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 420;')
         .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 50;'),
     );
-    const boostedStart = Number((await score.textContent()) ?? '0');
-    await page.waitForTimeout(1800);
-    const boostedEnd = Number((await score.textContent()) ?? '0');
-    const boostedDelta = boostedEnd - boostedStart;
 
-    expect(boostedDelta).toBeGreaterThan(baseDelta + 50);
+    const boostedState = await page.evaluate(() => {
+      window.__rhythmTest?.resetScore();
+      const tap = window.__rhythmTest?.peekUpcomingTapAny(0.35);
+      if (!tap) {
+        return { ok: false, score: 0 };
+      }
+      window.__rhythmTest?.playLaneAt(tap.lane, tap.timeSec);
+      return {
+        ok: true,
+        score: window.__rhythmTest?.read().score ?? 0,
+      };
+    });
+    expect(boostedState.ok).toBe(true);
+    expect(boostedState.score).toBeGreaterThan(baseDelta + 200);
   });
 
   test('changing C# hype threshold changes gameplay state', async ({ page }) => {
@@ -826,9 +848,10 @@ test.describe('Rhythm game flow', () => {
       { lane: hold.lane, endSec: hold.timeSec + hold.holdDurationSec },
     );
 
-    await expect(page.locator('#score')).not.toHaveText('0');
     await expect(page.locator('.hold-active')).toHaveCount(0);
-    await expect(page.locator('#judgement')).toHaveText(/TOBULA|GERAI|UŽSIVEDĘS/);
+    const afterRelease = await page.evaluate(() => window.__rhythmTest?.read());
+    expect(afterRelease?.score ?? 0).toBeGreaterThan(0);
+    expect(afterRelease?.judgement ?? '').toMatch(/TOBULA|GERAI|UŽSIVEDĘS/);
   });
 
   test('releasing just before hold end still scores within timing window', async ({ page }) => {
