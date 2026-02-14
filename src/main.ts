@@ -152,6 +152,7 @@ let perfFrameMsTotal = 0;
 let perfLastMemorySampleMs = 0;
 let perfMemorySampleInFlight = false;
 let perfMemoryText = 'tikrinama...';
+let perfLocalStorageLines = ['Vietinė saugykla: tikrinama...'];
 let lastVisibleNoteCount = 0;
 let disposed = false;
 let autoplayEnabled = true;
@@ -544,7 +545,80 @@ async function sampleMemoryText(): Promise<string> {
   return 'neprieinama (naršyklė nerodo)';
 }
 
-function queueMemorySample(nowMs: number): void {
+function formatStorageBytes(bytes: number): string {
+  if (!Number.isFinite(bytes) || bytes < 0) {
+    return 'neprieinama';
+  }
+  const mb = bytes / (1024 * 1024);
+  if (mb >= 1) {
+    return `${mb.toFixed(2)} MB`;
+  }
+
+  return `${Math.round(bytes / 1024)} KB`;
+}
+
+function readLocalStorageDebugLines(): string[] {
+  try {
+    const storage = window.localStorage;
+    const keyCount = storage.length;
+    let usedChars = 0;
+    for (let i = 0; i < keyCount; i += 1) {
+      const key = storage.key(i);
+      if (!key) {
+        continue;
+      }
+      const value = storage.getItem(key) ?? '';
+      usedChars += key.length + value.length;
+    }
+    const usedBytesApprox = usedChars * 2;
+
+    const ownPairs = LOCAL_STORAGE_KEYS_USED.map((key) => {
+      const value = storage.getItem(key);
+      return `${key}=${value === null ? 'nėra' : value}`;
+    });
+    const ownPresentCount = ownPairs.reduce(
+      (count, pair) => (pair.endsWith('=nėra') ? count : count + 1),
+      0,
+    );
+
+    return [
+      'Vietinė saugykla: prieinama',
+      `Raktų kiekis: ${keyCount}`,
+      `Mūsų raktai: ${ownPresentCount}/${LOCAL_STORAGE_KEYS_USED.length}`,
+      `Mūsų reikšmės: ${ownPairs.join(' | ')}`,
+      `Užimta (apytiksliai): ${formatStorageBytes(usedBytesApprox)}`,
+    ];
+  } catch (error) {
+    const reason = error instanceof Error && error.message ? error.message : 'klaida';
+    return [`Vietinė saugykla: neprieinama (${reason})`];
+  }
+}
+
+async function sampleLocalStorageLines(): Promise<string[]> {
+  const lines = readLocalStorageDebugLines();
+  const navigatorWithStorage = navigator as Navigator & {
+    storage?: { estimate?: () => Promise<{ usage?: number; quota?: number }> };
+  };
+  const estimateFn = navigatorWithStorage.storage?.estimate;
+  if (typeof estimateFn !== 'function') {
+    return lines;
+  }
+
+  try {
+    const estimate = await estimateFn.call(navigatorWithStorage.storage);
+    const usage =
+      typeof estimate.usage === 'number' ? formatStorageBytes(estimate.usage) : 'neprieinama';
+    const quota =
+      typeof estimate.quota === 'number' ? formatStorageBytes(estimate.quota) : 'neprieinama';
+    lines.push(`Naršyklės saugykla: ${usage} / ${quota}`);
+  } catch {
+    lines.push('Naršyklės saugykla: neprieinama');
+  }
+
+  return lines;
+}
+
+function queuePerformanceSamples(nowMs: number): void {
   if (perfMemorySampleInFlight) {
     return;
   }
@@ -554,9 +628,10 @@ function queueMemorySample(nowMs: number): void {
 
   perfLastMemorySampleMs = nowMs;
   perfMemorySampleInFlight = true;
-  void sampleMemoryText()
-    .then((next) => {
-      perfMemoryText = next;
+  void Promise.all([sampleMemoryText(), sampleLocalStorageLines()])
+    .then(([nextMemory, nextStorage]) => {
+      perfMemoryText = nextMemory;
+      perfLocalStorageLines = nextStorage;
     })
     .finally(() => {
       perfMemorySampleInFlight = false;
@@ -574,7 +649,7 @@ function updatePerformanceStats(nowMs: number): void {
   if (windowMs < 900) {
     return;
   }
-  queueMemorySample(nowMs);
+  queuePerformanceSamples(nowMs);
 
   const fps = perfFrameCount / (windowMs / 1000);
   const avgFrameMs = perfFrameCount > 0 ? perfFrameMsTotal / perfFrameCount : 0;
@@ -582,7 +657,7 @@ function updatePerformanceStats(nowMs: number): void {
   const horseStats = horseAnimator.getRuntimeStats();
   const visualCap = IS_COARSE_POINTER ? (autoplayEnabled ? 36 : 45) : 60;
 
-  perfStatsEl.textContent = [
+  const perfLines = [
     `Našumas: ${fps.toFixed(1)} kadr./s`,
     `Kadro laikas: ${avgFrameMs.toFixed(1)} ms`,
     `Atmintis: ${perfMemoryText}`,
@@ -591,8 +666,8 @@ function updatePerformanceStats(nowMs: number): void {
     `Garso balsai: ${audioStats.activeTransientVoices}`,
     `Laikomos natos: ${audioStats.activeHoldVoices}`,
     `Vizualo riba: ${visualCap} kadr./s`,
-    `Vietinė saugykla (localStorage): ${LOCAL_STORAGE_KEYS_USED.join(', ')}`,
-  ].join('\n');
+  ];
+  perfStatsEl.textContent = [...perfLines, ...perfLocalStorageLines].join('\n');
 
   perfWindowStartMs = nowMs;
   perfFrameCount = 0;
