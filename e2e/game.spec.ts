@@ -82,6 +82,90 @@ test.describe('Rhythm game flow', () => {
       .not.toBeNull();
   });
 
+  test('mute button toggles sound state with Lithuanian labels', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    const muteToggle = page.locator('#muteToggle');
+    await expect(muteToggle).toHaveText('Garsas: ĮJUNGTAS');
+
+    await muteToggle.click();
+    await expect(muteToggle).toHaveText('Garsas: IŠJUNGTAS');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readAudioRuntime() ?? null);
+      })
+      .toMatchObject({ userMuted: true, outputMuted: true });
+
+    await muteToggle.click();
+    await expect(muteToggle).toHaveText('Garsas: ĮJUNGTAS');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readAudioRuntime() ?? null);
+      })
+      .toMatchObject({ userMuted: false });
+  });
+
+  test('audio visualizer stays active with both įjungtas and išjungtas garsas', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await page.locator('.perf-stack > summary').click();
+    const footer = page.locator('.perf-stack .perf-stack-body');
+    await expect(footer.locator(':scope > #audioVisualizer')).toBeVisible();
+    await expect(footer.locator(':scope > #audioVisualizer + .build-number')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(false);
+      window.__rhythmTest?.resetScore();
+    });
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => {
+          const note = window.__rhythmTest?.peekUpcomingTapAny(0.2);
+          if (!note) {
+            return { ok: false, peak: 0 };
+          }
+          window.__rhythmTest?.playLaneAt(note.lane, note.timeSec);
+          const viz = window.__rhythmTest?.readAudioVisualizer();
+          return { ok: true, peak: viz?.peak ?? 0 };
+        });
+      })
+      .toMatchObject({ ok: true });
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readAudioVisualizer().peak ?? 0);
+      })
+      .toBeGreaterThan(0);
+
+    await page.locator('#muteToggle').click();
+    await expect(page.locator('#muteToggle')).toHaveText('Garsas: IŠJUNGTAS');
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => {
+          const note = window.__rhythmTest?.peekUpcomingTapAny(0.2);
+          if (!note) {
+            return { ok: false, peak: 0 };
+          }
+          window.__rhythmTest?.playLaneAt(note.lane, note.timeSec);
+          const viz = window.__rhythmTest?.readAudioVisualizer();
+          return { ok: true, peak: viz?.peak ?? 0 };
+        });
+      })
+      .toMatchObject({ ok: true });
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readAudioVisualizer().peak ?? 0);
+      })
+      .toBeGreaterThan(0);
+  });
+
   test('template buttons load preset code and apply gameplay changes', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();

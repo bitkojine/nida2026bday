@@ -18,6 +18,14 @@ interface AudioRuntimeStats {
   activeTransientVoices: number;
   activeHoldVoices: number;
   unlocked: boolean;
+  userMuted: boolean;
+  outputMuted: boolean;
+}
+
+interface AudioVisualizerSnapshot {
+  bars: number[];
+  level: number;
+  peak: number;
 }
 
 interface NavigatorAudioSession {
@@ -44,7 +52,7 @@ function toWaveShaperCurve(input: Float32Array): Float32Array<ArrayBuffer> {
 }
 
 export class GameAudio {
-  constructor(private readonly muted = false) {}
+  constructor(private readonly hardMuted = false) {}
 
   private context: AudioContext | null = null;
 
@@ -67,8 +75,24 @@ export class GameAudio {
 
   private readonly maxTransientVoices = 36;
 
+  private userMuted = false;
+
+  private visualPulse = 0;
+
+  private visualPhase = 0;
+
+  private readonly visualHoldLanes = new Set<number>();
+
+  private isOutputMuted(): boolean {
+    return this.hardMuted || this.userMuted;
+  }
+
+  private pushVisualizerPulse(amount: number): void {
+    this.visualPulse = Math.min(1.8, this.visualPulse + Math.max(0, amount));
+  }
+
   private configureAudioSessionForPlayback(): void {
-    if (this.muted) {
+    if (this.isOutputMuted()) {
       return;
     }
 
@@ -127,7 +151,7 @@ export class GameAudio {
   }
 
   unlock(): void {
-    if (this.muted) {
+    if (this.isOutputMuted()) {
       this.unlocked = true;
       return;
     }
@@ -142,7 +166,7 @@ export class GameAudio {
   }
 
   isUnlocked(): boolean {
-    if (this.muted) {
+    if (this.isOutputMuted()) {
       return true;
     }
 
@@ -156,7 +180,8 @@ export class GameAudio {
   }
 
   private noteInstrument(frequency: number, durationSec: number, whenOffsetSec = 0): void {
-    if (this.muted) {
+    this.pushVisualizerPulse(Math.min(1.2, 0.24 + durationSec * 1.1));
+    if (this.isOutputMuted()) {
       return;
     }
 
@@ -211,14 +236,14 @@ export class GameAudio {
     this.debugState.guideNotesRequested += 1;
     const duration = Math.min(0.26, 0.08 + holdDurationSec * 0.24);
     this.noteInstrument(frequency * 1.5, duration);
-    if (this.unlocked || this.muted) {
+    if (this.unlocked || this.isOutputMuted()) {
       this.debugState.guideNotesPlayed += 1;
     }
   }
 
   playSongBacking(frequency: number, holdDurationSec: number): void {
     this.debugState.backingNotesRequested += 1;
-    if (this.muted) {
+    if (this.isOutputMuted()) {
       this.debugState.backingNotesPlayed += 1;
       return;
     }
@@ -237,7 +262,12 @@ export class GameAudio {
   }
 
   startHold(lane: number): void {
-    if (this.muted) {
+    if (this.visualHoldLanes.has(lane)) {
+      return;
+    }
+    this.visualHoldLanes.add(lane);
+    this.pushVisualizerPulse(0.32);
+    if (this.isOutputMuted()) {
       return;
     }
 
@@ -279,6 +309,7 @@ export class GameAudio {
   }
 
   stopHold(lane: number): void {
+    this.visualHoldLanes.delete(lane);
     const tone = this.holds.get(lane);
     if (!tone) {
       return;
@@ -307,6 +338,7 @@ export class GameAudio {
   }
 
   stopAllHolds(): void {
+    this.visualHoldLanes.clear();
     for (const lane of this.holds.keys()) {
       this.stopHold(lane);
     }
@@ -318,6 +350,25 @@ export class GameAudio {
   ): void {
     void judgement;
     void options;
+  }
+
+  setMuted(nextMuted: boolean): void {
+    this.userMuted = nextMuted;
+    if (!this.context || !this.master) {
+      return;
+    }
+    if (nextMuted) {
+      this.stopAllHolds();
+      this.master.gain.setValueAtTime(0, this.context.currentTime);
+      return;
+    }
+    if (!this.hardMuted) {
+      this.master.gain.setValueAtTime(1, this.context.currentTime);
+    }
+  }
+
+  isMuted(): boolean {
+    return this.userMuted;
   }
 
   readDebugState(): AudioDebugState {
@@ -332,8 +383,37 @@ export class GameAudio {
   readRuntimeStats(): AudioRuntimeStats {
     return {
       activeTransientVoices: this.activeTransientVoices,
-      activeHoldVoices: this.holds.size,
+      activeHoldVoices: Math.max(this.holds.size, this.visualHoldLanes.size),
       unlocked: this.unlocked,
+      userMuted: this.userMuted,
+      outputMuted: this.isOutputMuted(),
+    };
+  }
+
+  sampleVisualizer(barCount = 48): AudioVisualizerSnapshot {
+    const safeBars = Math.max(12, Math.min(96, Math.floor(barCount)));
+    const holdEnergy = this.visualHoldLanes.size * 0.2;
+    const transientEnergy = this.activeTransientVoices * 0.02;
+    const baseLevel = Math.min(1, this.visualPulse + holdEnergy + transientEnergy);
+    this.visualPulse *= 0.9;
+
+    const bars = new Array<number>(safeBars);
+    let peak = 0;
+    for (let i = 0; i < safeBars; i += 1) {
+      const harmonic =
+        0.58 +
+        0.22 * Math.sin(this.visualPhase + i * 0.41) +
+        0.2 * Math.sin(this.visualPhase * 0.73 + i * 0.19);
+      const value = Math.max(0, Math.min(1, baseLevel * Math.abs(harmonic)));
+      bars[i] = value;
+      peak = Math.max(peak, value);
+    }
+    this.visualPhase += 0.14 + baseLevel * 0.05;
+
+    return {
+      bars,
+      level: baseLevel,
+      peak,
     };
   }
 
@@ -345,7 +425,7 @@ export class GameAudio {
   }
 
   suspend(): void {
-    if (this.muted) {
+    if (this.hardMuted) {
       this.unlocked = false;
       return;
     }
@@ -360,7 +440,7 @@ export class GameAudio {
   }
 
   shutdown(): void {
-    if (this.muted) {
+    if (this.hardMuted) {
       this.unlocked = false;
       return;
     }

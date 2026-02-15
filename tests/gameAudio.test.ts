@@ -201,4 +201,69 @@ describe('GameAudio', () => {
     expect(transientGain?.gain.peak).toBe(1);
     expect(holdGain?.gain.peak).toBe(1);
   });
+
+  test('toggles user mute state and silences active holds immediately', () => {
+    const ctx = new FakeAudioContext();
+    Object.defineProperty(window, 'AudioContext', {
+      configurable: true,
+      value: class {
+        constructor() {
+          return ctx;
+        }
+      },
+    });
+
+    const audio = new GameAudio(false);
+    audio.unlock();
+    audio.startHold(2);
+
+    const before = audio.readRuntimeStats();
+    expect(before.userMuted).toBe(false);
+    expect(before.outputMuted).toBe(false);
+    expect(before.activeHoldVoices).toBe(1);
+
+    audio.setMuted(true);
+    const muted = audio.readRuntimeStats();
+    expect(audio.isMuted()).toBe(true);
+    expect(muted.userMuted).toBe(true);
+    expect(muted.outputMuted).toBe(true);
+    expect(muted.activeHoldVoices).toBe(0);
+    expect(ctx.gains[0]?.gain.value).toBe(0);
+
+    audio.setMuted(false);
+    const unmuted = audio.readRuntimeStats();
+    expect(audio.isMuted()).toBe(false);
+    expect(unmuted.userMuted).toBe(false);
+    expect(unmuted.outputMuted).toBe(false);
+    expect(ctx.gains[0]?.gain.value).toBe(1);
+  });
+
+  test('visualizer reports activity for note events even when hard-muted', () => {
+    const audio = new GameAudio(true);
+    audio.unlock();
+    audio.onPress(0);
+    audio.playSongGuideNote(220, 0);
+    audio.playSongBacking(220, 0);
+
+    const snapshot = audio.sampleVisualizer(16);
+    expect(snapshot.bars.length).toBe(16);
+    expect(snapshot.peak).toBeGreaterThan(0);
+    expect(snapshot.level).toBeGreaterThan(0);
+  });
+
+  test('visualizer keeps activity while hold is active even when user-muted', () => {
+    const audio = new GameAudio(false);
+    audio.unlock();
+    audio.setMuted(true);
+    audio.startHold(1);
+
+    const active = audio.sampleVisualizer(16);
+    expect(active.peak).toBeGreaterThan(0);
+    expect(audio.readRuntimeStats().activeHoldVoices).toBe(1);
+
+    audio.stopHold(1);
+    const released = audio.sampleVisualizer(16);
+    expect(audio.readRuntimeStats().activeHoldVoices).toBe(0);
+    expect(released.peak).toBeGreaterThanOrEqual(0);
+  });
 });

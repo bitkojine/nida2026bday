@@ -55,6 +55,7 @@ app.innerHTML = `
         <div><strong>Daugiklis</strong><span id="multiplier">x1</span></div>
         <div><strong>Vertinimas</strong><span id="judgement">PRALEISTA</span></div>
         <button class="autoplay-toggle" id="autoplayToggle" type="button">Žaisti automatiškai: TAIP</button>
+        <button class="mute-toggle" id="muteToggle" type="button">Garsas: ĮJUNGTAS</button>
       </header>
 
       <canvas id="horseCanvas" aria-label="Šokantis arklys"></canvas>
@@ -111,6 +112,7 @@ app.innerHTML = `
       <details class="perf-stack" aria-label="Našumo statistika">
         <summary class="footer-info-title">ℹ️ Papildoma informacija apie žaidimą</summary>
         <div class="perf-stack-body">
+          <canvas id="audioVisualizer" class="audio-visualizer" aria-label="Garso vizualizatorius"></canvas>
           <p class="build-number">Versija: ${__BUILD_VILNIUS_TIME__} (Lietuva)</p>
           <p class="perf-stats" id="perfStats">Našumas: įkeliama...</p>
         </div>
@@ -126,7 +128,9 @@ const multiplierEl = requiredElement<HTMLElement>('#multiplier');
 const judgementEl = requiredElement<HTMLElement>('#judgement');
 const judgementPopEl = requiredElement<HTMLElement>('#judgementPop');
 const autoplayToggleEl = requiredElement<HTMLButtonElement>('#autoplayToggle');
+const muteToggleEl = requiredElement<HTMLButtonElement>('#muteToggle');
 const autoplayOverlayEl = requiredElement<HTMLElement>('#autoplayOverlay');
+const audioVisualizerEl = requiredElement<HTMLCanvasElement>('#audioVisualizer');
 const perfStatsEl = requiredElement<HTMLElement>('#perfStats');
 const puzzleProgressEl = requiredElement<HTMLElement>('#puzzleProgress');
 const puzzleStoryEl = requiredElement<HTMLElement>('#puzzleStory');
@@ -148,6 +152,7 @@ const silentAudio =
   navigator.webdriver;
 const audio = new GameAudio(silentAudio);
 const HYPE_LABEL = 'UŽSIVEDĘS';
+const FOOTER_CREDITS_LINE = 'Sukurta su meile: Robertas Rudys, 2026 m.';
 const HUD_VALUE_MAX_FONT_PX = 14;
 const HUD_VALUE_MIN_FONT_PX = 9;
 const IS_COARSE_POINTER = window.matchMedia('(pointer: coarse)').matches;
@@ -171,6 +176,7 @@ let perfLocalStorageLines = ['Vietinė saugykla: tikrinama...'];
 let lastVisibleNoteCount = 0;
 let disposed = false;
 let autoplayEnabled = true;
+let soundMuted = false;
 let pendingEditorSource: string | null = null;
 let readEditorSource = (): string => pendingEditorSource ?? CSHARP_TEMPLATE;
 let writeEditorSource = (next: string): void => {
@@ -208,6 +214,11 @@ if (!ctxOrNull) {
   throw new Error('Canvas context unavailable');
 }
 const ctx: CanvasRenderingContext2D = ctxOrNull;
+const audioVizCtxOrNull = audioVisualizerEl.getContext('2d');
+if (!audioVizCtxOrNull) {
+  throw new Error('Audio visualizer context unavailable');
+}
+const audioVizCtx: CanvasRenderingContext2D = audioVizCtxOrNull;
 
 const horseAnimator = new HorseAnimator(ctx);
 const allowedWeather = new Set(['SAULETA', 'LIETINGA', 'SNIEGAS', 'ZAIBAS']);
@@ -756,7 +767,9 @@ function updatePerformanceStats(nowMs: number): void {
     `Laikomos natos: ${audioStats.activeHoldVoices}`,
     `Vizualo riba: ${visualCap} kadr./s`,
   ];
-  perfStatsEl.textContent = [...perfLines, ...perfLocalStorageLines].join('\n');
+  perfStatsEl.textContent = [...perfLines, ...perfLocalStorageLines, FOOTER_CREDITS_LINE].join(
+    '\n',
+  );
 
   perfWindowStartMs = nowMs;
   perfFrameCount = 0;
@@ -766,6 +779,10 @@ function updatePerformanceStats(nowMs: number): void {
 function renderAutoplayUiState(): void {
   autoplayToggleEl.textContent = `Žaisti automatiškai: ${autoplayEnabled ? 'TAIP' : 'NE'}`;
   autoplayOverlayEl.classList.toggle('show', autoplayEnabled);
+}
+
+function renderSoundUiState(): void {
+  muteToggleEl.textContent = `Garsas: ${soundMuted ? 'IŠJUNGTAS' : 'ĮJUNGTAS'}`;
 }
 
 function shouldRenderVisualFrame(timeMs: number): boolean {
@@ -861,9 +878,41 @@ function resizeCanvas(): void {
   canvas.height = metrics.canvasHeight;
   ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
   fitHudValuesToBox();
+  resizeAudioVisualizer();
 }
 
 resizeCanvas();
+function resizeAudioVisualizer(): void {
+  const cssWidth = Math.max(180, Math.floor(audioVisualizerEl.clientWidth));
+  const cssHeight = 54;
+  const dpr = window.devicePixelRatio || 1;
+  audioVisualizerEl.width = Math.floor(cssWidth * dpr);
+  audioVisualizerEl.height = Math.floor(cssHeight * dpr);
+  audioVizCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+}
+
+function renderAudioVisualizer(): void {
+  const width = Math.max(1, Math.floor(audioVisualizerEl.width / (window.devicePixelRatio || 1)));
+  const height = Math.max(1, Math.floor(audioVisualizerEl.height / (window.devicePixelRatio || 1)));
+  const snapshot = audio.sampleVisualizer(52);
+  const { bars } = snapshot;
+  const barWidth = Math.max(1, Math.floor((width - (bars.length - 1)) / bars.length));
+  const gap = 1;
+
+  audioVizCtx.clearRect(0, 0, width, height);
+  audioVizCtx.fillStyle = 'rgba(255, 245, 226, 0.85)';
+  audioVizCtx.fillRect(0, 0, width, height);
+
+  const baseY = height - 4;
+  const usableHeight = height - 10;
+  for (let i = 0; i < bars.length; i += 1) {
+    const x = i * (barWidth + gap);
+    const barHeight = Math.max(2, Math.floor(usableHeight * bars[i]));
+    const hue = 28 + Math.round(bars[i] * 16);
+    audioVizCtx.fillStyle = `hsl(${hue}deg 90% 45%)`;
+    audioVizCtx.fillRect(x, baseY - barHeight, barWidth, barHeight);
+  }
+}
 function wireCanvasResize(): void {
   canvasScope.disposeAll();
   canvasScope.add(bindWindowResize(window, resizeCanvas));
@@ -1050,6 +1099,7 @@ function startLoop(): void {
       renderLanes(now);
       const holdingLane = activeHolds.values().next().value?.lane ?? null;
       horseAnimator.render(timeMs, mood, rules, activeHolds.size > 0, holdingLane);
+      renderAudioVisualizer();
       updatePerformanceStats(timeMs);
     }
     loopRafId = requestAnimationFrame(tick);
@@ -1287,14 +1337,20 @@ function wireInputs(): void {
   });
 }
 
-function wireAutoplayToggle(): void {
+function wireHudToggles(): void {
   autoplayScope.disposeAll();
   const onAutoplayToggle = (): void => {
     audio.unlock();
     autoplayEnabled = !autoplayEnabled;
     renderAutoplayUiState();
   };
+  const onMuteToggle = (): void => {
+    soundMuted = !soundMuted;
+    audio.setMuted(soundMuted);
+    renderSoundUiState();
+  };
   autoplayScope.add(bindElementClick(autoplayToggleEl, onAutoplayToggle));
+  autoplayScope.add(bindElementClick(muteToggleEl, onMuteToggle));
 }
 
 function wireWindowLifecycleBindings(): void {
@@ -1358,6 +1414,11 @@ declare global {
         backingNotesRequested: number;
         backingNotesPlayed: number;
       };
+      readAudioRuntime(): {
+        userMuted: boolean;
+        outputMuted: boolean;
+      };
+      readAudioVisualizer(): { level: number; peak: number; bars: number[] };
     };
   }
 }
@@ -1508,6 +1569,19 @@ window.__rhythmTest = {
   } {
     return audio.readDebugState();
   },
+  readAudioRuntime(): {
+    userMuted: boolean;
+    outputMuted: boolean;
+  } {
+    const runtime = audio.readRuntimeStats();
+    return {
+      userMuted: runtime.userMuted,
+      outputMuted: runtime.outputMuted,
+    };
+  },
+  readAudioVisualizer(): { level: number; peak: number; bars: number[] } {
+    return audio.sampleVisualizer(24);
+  },
 };
 
 void compiler.init();
@@ -1517,9 +1591,10 @@ wireTemplateButtons();
 wireAudioBootstrap();
 wireCanvasResize();
 wireInputs();
-wireAutoplayToggle();
+wireHudToggles();
 wireWindowLifecycleBindings();
 renderAutoplayUiState();
+renderSoundUiState();
 applyGlobalWeatherTheme(rules.oroEfektas);
 renderPuzzleProgress();
 fitHudValuesToBox();
