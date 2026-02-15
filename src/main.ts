@@ -93,9 +93,7 @@ app.innerHTML = `
       </section>
 
       <details class="code-studio">
-        <summary>
-          <span>C# studija: keisk žaidimo taisykles</span>
-        </summary>
+        <summary class="collapsible-title">💻 C# studija: keisk žaidimo taisykles</summary>
         <section class="editor-panel" id="editorPanel">
           <div id="editor" class="editor"></div>
           <button
@@ -117,7 +115,7 @@ app.innerHTML = `
         </section>
       </details>
       <details class="perf-stack" aria-label="Našumo statistika">
-        <summary class="footer-info-title">ℹ️ Papildoma informacija apie žaidimą</summary>
+        <summary class="collapsible-title">ℹ️ Papildoma informacija apie žaidimą</summary>
         <div class="perf-stack-body">
           <canvas id="audioVisualizer" class="audio-visualizer" aria-label="Garso vizualizatorius"></canvas>
           <p class="build-number">Versija: ${__BUILD_VILNIUS_TIME__} (Lietuva)</p>

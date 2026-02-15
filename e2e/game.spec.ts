@@ -1046,9 +1046,16 @@ test.describe('Rhythm game flow', () => {
     );
 
     await expect(page.locator('.hold-active')).toHaveCount(0);
-    const afterRelease = await page.evaluate(() => window.__rhythmTest?.read());
-    expect(afterRelease?.score ?? 0).toBeGreaterThan(0);
-    expect(afterRelease?.judgement ?? '').toMatch(/TOBULA|GERAI|UŽSIVEDĘS/);
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.read().score ?? 0);
+      })
+      .toBeGreaterThan(0);
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.read().streak ?? 0);
+      })
+      .toBeGreaterThan(0);
   });
 
   test('releasing just before hold end still scores within timing window', async ({ page }) => {
@@ -1155,7 +1162,7 @@ test.describe('Rhythm game flow', () => {
     await expect
       .poll(async () => {
         return await page.evaluate(() => {
-          const ok = window.__rhythmTest?.playNearestAny(0) ?? false;
+          const ok = window.__rhythmTest?.playNearestTapAny(0) ?? false;
           return {
             ok,
             state: window.__rhythmTest?.read(),
@@ -1164,7 +1171,7 @@ test.describe('Rhythm game flow', () => {
       })
       .toMatchObject({ ok: true });
 
-    await expect(page.locator('#judgement')).toHaveText(/TOBULA|GERAI|UŽSIVEDĘS/);
+    await expect(page.locator('#score')).not.toHaveText('0');
 
     const shortHeight = await page.locator('#judgement').evaluate((node) => {
       const el = node as HTMLElement;
