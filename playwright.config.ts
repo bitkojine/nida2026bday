@@ -14,14 +14,23 @@ export default defineConfig({
   },
   projects: [
     {
-      name: 'iphone',
+      name: 'iphone-12-pro-max',
       use: {
-        ...devices['iPhone 14'],
+        browserName: 'webkit',
+        ...devices['iPhone 12 Pro Max'],
+      },
+    },
+    {
+      name: 'iphone-15-pro',
+      use: {
+        browserName: 'webkit',
+        ...devices['iPhone 15 Pro'],
       },
     },
     {
       name: 'desktop-chromium',
       use: {
+        browserName: 'chromium',
         ...devices['Desktop Chrome'],
       },
     },

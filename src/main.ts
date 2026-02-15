@@ -96,8 +96,15 @@ app.innerHTML = `
         <summary>
           <span>C# studija: keisk žaidimo taisykles</span>
         </summary>
-        <section class="editor-panel">
+        <section class="editor-panel" id="editorPanel">
           <div id="editor" class="editor"></div>
+          <button
+            class="editor-resizer"
+            id="editorResizer"
+            type="button"
+            aria-label="Keisti kodo lango aukštį"
+            title="Keisti kodo lango aukštį"
+          ></button>
         </section>
         <section id="templateReward" class="template-panel" aria-label="C# šablonai" hidden>
           <p class="template-title">Greiti šablonai: išbandyk, kas įmanoma</p>
@@ -140,6 +147,8 @@ const puzzleDoneEl = requiredElement<HTMLElement>('#puzzleDone');
 const templateLockNoteEl = requiredElement<HTMLElement>('#templateLockNote');
 const templateRewardEl = requiredElement<HTMLElement>('#templateReward');
 const laneHighwayEl = requiredElement<HTMLElement>('#laneHighway');
+const editorPanelEl = requiredElement<HTMLElement>('#editorPanel');
+const editorResizerEl = requiredElement<HTMLButtonElement>('#editorResizer');
 const canvas = requiredElement<HTMLCanvasElement>('#horseCanvas');
 const editorHost = requiredElement<HTMLDivElement>('#editor');
 
@@ -157,7 +166,8 @@ const HUD_VALUE_MAX_FONT_PX = 14;
 const HUD_VALUE_MIN_FONT_PX = 9;
 const IS_COARSE_POINTER = window.matchMedia('(pointer: coarse)').matches;
 const PUZZLE_UNLOCK_STORAGE_KEY = 'nida2026bday:puzzlesUnlocked:v1';
-const LOCAL_STORAGE_KEYS_USED = [PUZZLE_UNLOCK_STORAGE_KEY];
+const SOUND_MUTED_STORAGE_KEY = 'nida2026bday:soundMuted:v1';
+const LOCAL_STORAGE_KEYS_USED = [PUZZLE_UNLOCK_STORAGE_KEY, SOUND_MUTED_STORAGE_KEY];
 
 let rules: DanceRules = DEFAULT_RULES;
 let mood: HorseMood = 'GERAI';
@@ -189,6 +199,7 @@ const canvasScope = createRuntimeScope();
 const autoplayScope = createRuntimeScope();
 const windowLifecycleScope = createRuntimeScope();
 const templateScope = createRuntimeScope();
+const editorResizeScope = createRuntimeScope();
 let puzzlesUnlocked = false;
 const autoPlayedBeatIds = new Set<number>();
 const songPlayedBeatIds = new Set<number>();
@@ -252,6 +263,26 @@ function writePuzzlesUnlocked(next: boolean): void {
     }
   } catch {
     // Ignore storage failures; gameplay still works in-memory.
+  }
+}
+
+function readSoundMuted(): boolean {
+  try {
+    return window.localStorage.getItem(SOUND_MUTED_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeSoundMuted(next: boolean): void {
+  try {
+    if (next) {
+      window.localStorage.setItem(SOUND_MUTED_STORAGE_KEY, '1');
+    } else {
+      window.localStorage.removeItem(SOUND_MUTED_STORAGE_KEY);
+    }
+  } catch {
+    // Ignore storage failures; mute still works for current session.
   }
 }
 
@@ -379,6 +410,7 @@ function teardownGame(): void {
   autoplayScope.disposeAll();
   windowLifecycleScope.disposeAll();
   templateScope.disposeAll();
+  editorResizeScope.disposeAll();
 
   if (loopRafId !== null) {
     window.cancelAnimationFrame(loopRafId);
@@ -1347,6 +1379,7 @@ function wireHudToggles(): void {
   const onMuteToggle = (): void => {
     soundMuted = !soundMuted;
     audio.setMuted(soundMuted);
+    writeSoundMuted(soundMuted);
     renderSoundUiState();
   };
   autoplayScope.add(bindElementClick(autoplayToggleEl, onAutoplayToggle));
@@ -1364,6 +1397,122 @@ function wireWindowLifecycleBindings(): void {
     teardownGame();
   };
   windowLifecycleScope.add(bindWindowLifecycle(window, onPageHide, onBeforeUnload));
+}
+
+function wireEditorResizeHandle(): void {
+  editorResizeScope.disposeAll();
+  const abortController = new AbortController();
+  const { signal } = abortController;
+  let dragging = false;
+  let startY = 0;
+  let startHeight = 0;
+
+  const clampHeight = (value: number): number => {
+    const minHeight = 220;
+    return Math.max(minHeight, Math.round(value));
+  };
+
+  const onPointerMove = (event: PointerEvent): void => {
+    if (!dragging) {
+      return;
+    }
+    event.preventDefault();
+    const nextHeight = clampHeight(startHeight + (event.clientY - startY));
+    editorPanelEl.style.height = `${nextHeight}px`;
+    window.dispatchEvent(new Event('resize'));
+  };
+
+  const onMoveY = (clientY: number): void => {
+    const nextHeight = clampHeight(startHeight + (clientY - startY));
+    editorPanelEl.style.height = `${nextHeight}px`;
+    window.dispatchEvent(new Event('resize'));
+  };
+
+  const onPointerUp = (): void => {
+    dragging = false;
+    document.body.classList.remove('dragging-editor-resize');
+  };
+
+  editorResizerEl.addEventListener(
+    'pointerdown',
+    (event) => {
+      if (event.button !== 0 && event.pointerType !== 'touch') {
+        return;
+      }
+      event.preventDefault();
+      dragging = true;
+      startY = event.clientY;
+      startHeight = editorPanelEl.getBoundingClientRect().height;
+      document.body.classList.add('dragging-editor-resize');
+      editorResizerEl.setPointerCapture(event.pointerId);
+    },
+    { signal },
+  );
+  editorResizerEl.addEventListener(
+    'mousedown',
+    (event) => {
+      if (event.button !== 0) {
+        return;
+      }
+      event.preventDefault();
+      dragging = true;
+      startY = event.clientY;
+      startHeight = editorPanelEl.getBoundingClientRect().height;
+      document.body.classList.add('dragging-editor-resize');
+    },
+    { signal },
+  );
+  editorResizerEl.addEventListener(
+    'touchstart',
+    (event) => {
+      const touch = event.touches[0];
+      if (!touch) {
+        return;
+      }
+      event.preventDefault();
+      dragging = true;
+      startY = touch.clientY;
+      startHeight = editorPanelEl.getBoundingClientRect().height;
+      document.body.classList.add('dragging-editor-resize');
+    },
+    { passive: false, signal },
+  );
+  window.addEventListener('pointermove', onPointerMove, { passive: false, signal });
+  window.addEventListener(
+    'mousemove',
+    (event) => {
+      if (!dragging) {
+        return;
+      }
+      onMoveY(event.clientY);
+    },
+    { signal },
+  );
+  window.addEventListener(
+    'touchmove',
+    (event) => {
+      if (!dragging) {
+        return;
+      }
+      const touch = event.touches[0];
+      if (!touch) {
+        return;
+      }
+      event.preventDefault();
+      onMoveY(touch.clientY);
+    },
+    { passive: false, signal },
+  );
+  window.addEventListener('pointerup', onPointerUp, { signal });
+  window.addEventListener('pointercancel', onPointerUp, { signal });
+  window.addEventListener('mouseup', onPointerUp, { signal });
+  window.addEventListener('touchend', onPointerUp, { signal });
+  window.addEventListener('touchcancel', onPointerUp, { signal });
+
+  editorResizeScope.add(() => {
+    abortController.abort();
+    document.body.classList.remove('dragging-editor-resize');
+  });
 }
 
 declare global {
@@ -1586,12 +1735,15 @@ window.__rhythmTest = {
 
 void compiler.init();
 puzzlesUnlocked = readPuzzlesUnlocked();
+soundMuted = readSoundMuted();
+audio.setMuted(soundMuted);
 void initEditor();
 wireTemplateButtons();
 wireAudioBootstrap();
 wireCanvasResize();
 wireInputs();
 wireHudToggles();
+wireEditorResizeHandle();
 wireWindowLifecycleBindings();
 renderAutoplayUiState();
 renderSoundUiState();

@@ -106,6 +106,25 @@ test.describe('Rhythm game flow', () => {
       .toMatchObject({ userMuted: false });
   });
 
+  test('mute setting is remembered after page reload', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    const muteToggle = page.locator('#muteToggle');
+    await expect(muteToggle).toHaveText('Garsas: ĮJUNGTAS');
+    await muteToggle.click();
+    await expect(muteToggle).toHaveText('Garsas: IŠJUNGTAS');
+
+    await page.reload();
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await expect(page.locator('#muteToggle')).toHaveText('Garsas: IŠJUNGTAS');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readAudioRuntime() ?? null);
+      })
+      .toMatchObject({ userMuted: true });
+  });
+
   test('audio visualizer stays active with both įjungtas and išjungtas garsas', async ({
     page,
   }) => {
@@ -211,6 +230,73 @@ test.describe('Rhythm game flow', () => {
     expect(rules?.serijaIkiHype).toBe(3);
     expect(rules?.suKepure).toBe(true);
     expect(rules?.oroEfektas).toBe('SAULETA');
+  });
+
+  test('codebox supports resize and expands editable area height', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    const studio = page.locator('.code-studio');
+    const isOpen = await studio.evaluate((node) => (node as HTMLDetailsElement).open);
+    if (!isOpen) {
+      await page.locator('.code-studio summary').click();
+    }
+
+    const panel = page.locator('.editor-panel');
+    const resizeMode = await panel.evaluate((el) => window.getComputedStyle(el).resize);
+    expect(resizeMode).toBe('none');
+
+    const fallback = page.locator('#fallbackCode');
+    await expect(fallback).toBeVisible();
+    const beforeHeight = await fallback.evaluate((el) => (el as HTMLElement).clientHeight);
+    const beforePanelHeight = await panel.evaluate((el) => el.getBoundingClientRect().height);
+
+    const resizeHandle = page.locator('#editorResizer');
+    await expect(resizeHandle).toBeVisible();
+    await page.evaluate(() => {
+      const panel = document.querySelector<HTMLElement>('.editor-panel');
+      const handle = document.querySelector<HTMLElement>('#editorResizer');
+      if (!panel || !handle) {
+        return;
+      }
+      const startY = panel.getBoundingClientRect().bottom - 6;
+      handle.dispatchEvent(
+        new MouseEvent('mousedown', {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          clientY: startY,
+        }),
+      );
+      window.dispatchEvent(
+        new MouseEvent('mousemove', {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          clientY: startY + 140,
+        }),
+      );
+      window.dispatchEvent(
+        new MouseEvent('mouseup', {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          clientY: startY + 140,
+        }),
+      );
+    });
+
+    await expect
+      .poll(async () => {
+        return await panel.evaluate((el) => el.getBoundingClientRect().height);
+      })
+      .toBeGreaterThan(beforePanelHeight + 80);
+
+    await expect
+      .poll(async () => {
+        return await fallback.evaluate((el) => (el as HTMLElement).clientHeight);
+      })
+      .toBeGreaterThan(beforeHeight + 80);
   });
 
   test('passes all learning missions step-by-step and unlocks templates', async ({ page }) => {

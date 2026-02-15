@@ -664,10 +664,58 @@ h1 {
   border-radius: 14px;
   border: 1px solid rgba(130, 93, 47, 0.2);
   overflow: hidden;
+  min-height: 220px;
+  height: 300px;
+  position: relative;
+  background: #fffdf8;
+}
+
+.editor-resizer {
+  position: absolute;
+  right: 8px;
+  bottom: 8px;
+  width: 22px;
+  height: 22px;
+  border: 0;
+  border-radius: 6px;
+  background-color: transparent;
+  background:
+    linear-gradient(
+      135deg,
+      transparent 42%,
+      rgba(141, 108, 67, 0.6) 42%,
+      rgba(141, 108, 67, 0.6) 54%,
+      transparent 54%
+    ),
+    linear-gradient(
+      135deg,
+      transparent 58%,
+      rgba(141, 108, 67, 0.42) 58%,
+      rgba(141, 108, 67, 0.42) 70%,
+      transparent 70%
+    ),
+    linear-gradient(
+      135deg,
+      transparent 74%,
+      rgba(141, 108, 67, 0.28) 74%,
+      rgba(141, 108, 67, 0.28) 86%,
+      transparent 86%
+    );
+  cursor: ns-resize;
+  touch-action: none;
+  z-index: 6;
+}
+
+.dragging-editor-resize,
+.dragging-editor-resize * {
+  cursor: ns-resize !important;
+  -webkit-user-select: none !important;
+  user-select: none !important;
 }
 
 .editor {
-  height: 300px;
+  height: 100%;
+  min-height: 100%;
 }
 
 .template-panel {
@@ -812,14 +860,15 @@ h1 {
 
 .syntax-editor {
   position: relative;
-  height: 300px;
+  height: 100%;
+  min-height: 100%;
   background: #fffdf8;
 }
 
 .fallback-lines,
 .fallback-highlight,
 .fallback-editor {
-  height: 300px;
+  height: 100%;
   width: 100%;
   margin: 0;
   padding: 12px;
@@ -1178,14 +1227,11 @@ h1 {
     min-height: 50px;
   }
 
-  .editor {
-    height: 230px;
-  }
-
+  .editor,
   .syntax-editor,
   .fallback-lines,
   .fallback-highlight,
   .fallback-editor {
-    height: 230px;
+    height: 100%;
   }
 }
