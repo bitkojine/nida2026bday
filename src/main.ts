@@ -7,6 +7,7 @@ import { buildLayoutMetrics } from './core/layoutManager';
 import { computeNoteYPercent } from './core/noteLayout';
 import type { HitEvaluation } from './core/rhythmEngine';
 import { RhythmEngine } from './core/rhythmEngine';
+import { createRuntimeScope } from './core/runtimeScope';
 import { planSongPlaybackBatch } from './core/songPlaybackPlanner';
 import { DEFAULT_SONG_MAP } from './core/songMap';
 import { DEFAULT_RULES, type DanceRules, type HorseMood, type Judgement } from './core/types';
@@ -175,12 +176,13 @@ let readEditorSource = (): string => pendingEditorSource ?? CSHARP_TEMPLATE;
 let writeEditorSource = (next: string): void => {
   pendingEditorSource = next;
 };
-let cleanupAudioBootstrapBindings: (() => void) | null = null;
-let cleanupSimpleEditorResizeBindings: (() => void) | null = null;
-let cleanupInputBindings: (() => void) | null = null;
-let cleanupCanvasResizeBinding: (() => void) | null = null;
-let cleanupAutoplayToggleBinding: (() => void) | null = null;
-let cleanupWindowLifecycleBindings: (() => void) | null = null;
+const audioBootstrapScope = createRuntimeScope();
+const editorScope = createRuntimeScope();
+const inputScope = createRuntimeScope();
+const canvasScope = createRuntimeScope();
+const autoplayScope = createRuntimeScope();
+const windowLifecycleScope = createRuntimeScope();
+const templateScope = createRuntimeScope();
 let puzzlesUnlocked = false;
 const autoPlayedBeatIds = new Set<number>();
 const songPlayedBeatIds = new Set<number>();
@@ -296,12 +298,11 @@ function renderPuzzleProgress(): void {
 }
 
 function wireAudioBootstrap(): void {
+  audioBootstrapScope.disposeAll();
   if (audioRetryIntervalId !== null) {
     window.clearInterval(audioRetryIntervalId);
     audioRetryIntervalId = null;
   }
-  cleanupAudioBootstrapBindings?.();
-  cleanupAudioBootstrapBindings = null;
 
   const tryUnlock = (): void => {
     audio.unlock();
@@ -321,20 +322,28 @@ function wireAudioBootstrap(): void {
     }
     tryUnlock();
   }, 900);
+  audioBootstrapScope.add(() => {
+    if (audioRetryIntervalId !== null) {
+      window.clearInterval(audioRetryIntervalId);
+      audioRetryIntervalId = null;
+    }
+  });
 
   // Policy-safe recovery hooks for browsers that require any user gesture.
-  cleanupAudioBootstrapBindings = bindAudioBootstrapBindings({
-    win: window,
-    doc: document,
-    tryUnlock,
-    onHidden: () => {
-      audio.stopAllHolds();
-      audio.suspend();
-    },
-    onVisible: () => {
-      tryUnlock();
-    },
-  });
+  audioBootstrapScope.add(
+    bindAudioBootstrapBindings({
+      win: window,
+      doc: document,
+      tryUnlock,
+      onHidden: () => {
+        audio.stopAllHolds();
+        audio.suspend();
+      },
+      onVisible: () => {
+        tryUnlock();
+      },
+    }),
+  );
 }
 
 function teardownGame(): void {
@@ -352,18 +361,13 @@ function teardownGame(): void {
     window.clearInterval(audioRetryIntervalId);
     audioRetryIntervalId = null;
   }
-  cleanupAudioBootstrapBindings?.();
-  cleanupAudioBootstrapBindings = null;
-  cleanupSimpleEditorResizeBindings?.();
-  cleanupSimpleEditorResizeBindings = null;
-  cleanupInputBindings?.();
-  cleanupInputBindings = null;
-  cleanupCanvasResizeBinding?.();
-  cleanupCanvasResizeBinding = null;
-  cleanupAutoplayToggleBinding?.();
-  cleanupAutoplayToggleBinding = null;
-  cleanupWindowLifecycleBindings?.();
-  cleanupWindowLifecycleBindings = null;
+  audioBootstrapScope.disposeAll();
+  editorScope.disposeAll();
+  inputScope.disposeAll();
+  canvasScope.disposeAll();
+  autoplayScope.disposeAll();
+  windowLifecycleScope.disposeAll();
+  templateScope.disposeAll();
 
   if (loopRafId !== null) {
     window.cancelAnimationFrame(loopRafId);
@@ -385,6 +389,7 @@ function shouldUseSimpleEditor(): boolean {
 }
 
 function mountSimpleEditor(): void {
+  editorScope.disposeAll();
   editorHost.innerHTML =
     '<div class="syntax-editor"><pre class="fallback-lines" id="fallbackLines" aria-hidden="true"></pre><pre class="fallback-highlight" id="fallbackHighlight" aria-hidden="true"></pre><textarea class="fallback-editor" id="fallbackCode" spellcheck="false" autocapitalize="off" autocorrect="off" autocomplete="off"></textarea></div>';
   const fallback = document.querySelector<HTMLTextAreaElement>('#fallbackCode');
@@ -456,10 +461,16 @@ function mountSimpleEditor(): void {
 
   syncLines();
   syncHighlight();
-  fallback.addEventListener('input', () => {
-    syncLines();
-    syncHighlight();
-  });
+  const fallbackEventsAbort = new AbortController();
+  const { signal } = fallbackEventsAbort;
+  fallback.addEventListener(
+    'input',
+    () => {
+      syncLines();
+      syncHighlight();
+    },
+    { signal },
+  );
   fallback.addEventListener(
     'scroll',
     () => {
@@ -471,35 +482,48 @@ function mountSimpleEditor(): void {
         syncOverlayScroll();
       });
     },
-    { passive: true },
+    { passive: true, signal },
   );
-  cleanupSimpleEditorResizeBindings?.();
-  cleanupSimpleEditorResizeBindings = bindSimpleEditorResizeBindings({
-    win: window,
-    fallback,
-    syncLines,
-    ResizeObserverCtor: typeof ResizeObserver !== 'undefined' ? ResizeObserver : undefined,
+  editorScope.add(() => {
+    fallbackEventsAbort.abort();
   });
+  editorScope.add(() => {
+    if (scrollSyncRafId !== null) {
+      window.cancelAnimationFrame(scrollSyncRafId);
+      scrollSyncRafId = null;
+    }
+  });
+  editorScope.add(
+    bindSimpleEditorResizeBindings({
+      win: window,
+      fallback,
+      syncLines,
+      ResizeObserverCtor: typeof ResizeObserver !== 'undefined' ? ResizeObserver : undefined,
+    }),
+  );
 }
 
 function wireTemplateButtons(): void {
+  templateScope.disposeAll();
   document.querySelectorAll<HTMLButtonElement>('.template-btn').forEach((button) => {
-    button.addEventListener('click', () => {
-      const templateId = button.dataset.templateId;
-      if (!templateId) {
-        return;
-      }
+    templateScope.add(
+      bindElementClick(button, () => {
+        const templateId = button.dataset.templateId;
+        if (!templateId) {
+          return;
+        }
 
-      const next = applyDanceRuleTemplate(readEditorSource(), templateId);
-      if (next === readEditorSource()) {
-        return;
-      }
+        const next = applyDanceRuleTemplate(readEditorSource(), templateId);
+        if (next === readEditorSource()) {
+          return;
+        }
 
-      writeEditorSource(next);
-      document.querySelectorAll<HTMLButtonElement>('.template-btn').forEach((el) => {
-        el.classList.toggle('active', el === button);
-      });
-    });
+        writeEditorSource(next);
+        document.querySelectorAll<HTMLButtonElement>('.template-btn').forEach((el) => {
+          el.classList.toggle('active', el === button);
+        });
+      }),
+    );
   });
 }
 
@@ -841,8 +865,8 @@ function resizeCanvas(): void {
 
 resizeCanvas();
 function wireCanvasResize(): void {
-  cleanupCanvasResizeBinding?.();
-  cleanupCanvasResizeBinding = bindWindowResize(window, resizeCanvas);
+  canvasScope.disposeAll();
+  canvasScope.add(bindWindowResize(window, resizeCanvas));
 }
 
 function applyJudgement(judgement: Judgement, displayJudgement: string, lane: number | null): void {
@@ -1078,7 +1102,7 @@ async function initEditor(): Promise<void> {
 }
 
 function wireInputs(): void {
-  cleanupInputBindings?.();
+  inputScope.disposeAll();
   const abortController = new AbortController();
   const { signal } = abortController;
 
@@ -1258,23 +1282,23 @@ function wireInputs(): void {
     { signal },
   );
 
-  cleanupInputBindings = (): void => {
+  inputScope.add(() => {
     abortController.abort();
-  };
+  });
 }
 
 function wireAutoplayToggle(): void {
-  cleanupAutoplayToggleBinding?.();
+  autoplayScope.disposeAll();
   const onAutoplayToggle = (): void => {
     audio.unlock();
     autoplayEnabled = !autoplayEnabled;
     renderAutoplayUiState();
   };
-  cleanupAutoplayToggleBinding = bindElementClick(autoplayToggleEl, onAutoplayToggle);
+  autoplayScope.add(bindElementClick(autoplayToggleEl, onAutoplayToggle));
 }
 
 function wireWindowLifecycleBindings(): void {
-  cleanupWindowLifecycleBindings?.();
+  windowLifecycleScope.disposeAll();
   const onPageHide = (event: PageTransitionEvent): void => {
     if (!event.persisted) {
       teardownGame();
@@ -1283,7 +1307,7 @@ function wireWindowLifecycleBindings(): void {
   const onBeforeUnload = (): void => {
     teardownGame();
   };
-  cleanupWindowLifecycleBindings = bindWindowLifecycle(window, onPageHide, onBeforeUnload);
+  windowLifecycleScope.add(bindWindowLifecycle(window, onPageHide, onBeforeUnload));
 }
 
 declare global {
