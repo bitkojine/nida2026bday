@@ -132,7 +132,7 @@ test.describe('Rhythm game flow', () => {
     });
   });
 
-  test('shows dedication at bottom and game is active immediately', async ({ page }) => {
+  test('@smoke30 shows dedication at bottom and game is active immediately', async ({ page }) => {
     await page.goto('/');
 
     await expect(page.locator('#gameScreen')).toBeVisible();
@@ -224,7 +224,7 @@ test.describe('Rhythm game flow', () => {
       .toMatchObject({ userMuted: true });
   });
 
-  test('C# code is remembered after reload via localStorage', async ({ page }) => {
+  test('@smoke30 C# code is remembered after reload via localStorage', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
 
@@ -2014,7 +2014,7 @@ test.describe('Rhythm game flow', () => {
       .toBe(222);
   });
 
-  test('invalid code enables technical test background and sleeping horse until compile recovers', async ({
+  test('@smoke30 invalid code enables technical test background and sleeping horse until compile recovers', async ({
     page,
   }) => {
     await page.goto('/');
