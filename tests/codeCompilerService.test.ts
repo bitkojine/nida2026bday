@@ -89,34 +89,16 @@ describe('CodeCompilerService', () => {
     expect(bad.rules.akiuSpalva).toBe('JUODA');
   });
 
-  it('supports legacy string eye-color method and maps known hex values', () => {
+  it('fails compile when eye-color method uses invalid return type or missing return', () => {
     const service = new CodeCompilerService();
-    const legacyMethod = CSHARP_TEMPLATE.replace(
+    const wrongReturnType = CSHARP_TEMPLATE.replace(
       `public Spalva AkiuSpalva()
     {
         return Spalva.JUODA;
     }`,
       `public string AkiuSpalva()
     {
-        return "#ff93d1";
-    }`,
-    );
-
-    const result = service.compile(legacyMethod);
-    expect(result.success).toBe(true);
-    expect(result.rules.akiuSpalva).toBe('ROZINE');
-  });
-
-  it('falls back for unknown legacy eye-color string and fails only malformed methods', () => {
-    const service = new CodeCompilerService();
-    const unknownLegacy = CSHARP_TEMPLATE.replace(
-      `public Spalva AkiuSpalva()
-    {
-        return Spalva.JUODA;
-    }`,
-      `public string AkiuSpalva()
-    {
-        return "#123456";
+        return "JUODA";
     }`,
     );
     const missingReturn = CSHARP_TEMPLATE.replace(
@@ -124,8 +106,7 @@ describe('CodeCompilerService', () => {
       '// no return here on purpose',
     );
 
-    expect(service.compile(unknownLegacy).success).toBe(true);
-    expect(service.compile(unknownLegacy).rules.akiuSpalva).toBe('JUODA');
+    expect(service.compile(wrongReturnType).success).toBe(false);
     expect(service.compile(missingReturn).success).toBe(false);
   });
 

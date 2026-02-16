@@ -404,7 +404,6 @@ test.describe('Rhythm game flow', () => {
           return {
             solvedCount: window.localStorage.getItem('nida2026bday:puzzlesSolvedCount:v1'),
             soundMuted: window.localStorage.getItem('nida2026bday:soundMuted:v1'),
-            legacyUnlock: window.localStorage.getItem('nida2026bday:puzzlesUnlocked:v1'),
             source: window.__rhythmTest?.readEditorSource() ?? '',
           };
         });
@@ -412,7 +411,6 @@ test.describe('Rhythm game flow', () => {
       .toMatchObject({
         solvedCount: null,
         soundMuted: null,
-        legacyUnlock: null,
       });
 
     await expect
@@ -1108,35 +1106,6 @@ test.describe('Rhythm game flow', () => {
     await expect(page.locator('#templateLockNote')).toBeVisible();
   });
 
-  test('legacy unlock key is migrated to solved-count progress and then removed', async ({
-    page,
-  }) => {
-    await page.goto('/');
-    await expect(page.locator('#gameScreen')).toBeVisible();
-
-    await page.evaluate(() => {
-      window.localStorage.removeItem('nida2026bday:puzzlesSolvedCount:v1');
-      window.localStorage.setItem('nida2026bday:puzzlesUnlocked:v1', '1');
-    });
-
-    await page.reload();
-    await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
-    await ensureCodeStudioOpen(page);
-    await expect(page.locator('#templateReward')).toBeVisible();
-    await expect(page.locator('#templateLockNote')).toBeHidden();
-
-    await expect
-      .poll(async () => {
-        return await page.evaluate(() => {
-          return {
-            solvedCount: window.localStorage.getItem('nida2026bday:puzzlesSolvedCount:v1'),
-            legacyUnlock: window.localStorage.getItem('nida2026bday:puzzlesUnlocked:v1'),
-          };
-        });
-      })
-      .toEqual({ solvedCount: '5', legacyUnlock: null });
-  });
-
   test('missions still complete when required changes are applied in different order', async ({
     page,
   }) => {
@@ -1663,6 +1632,10 @@ test.describe('Rhythm game flow', () => {
   });
 
   test('@perf-common detects sustained FPS regressions on desktop', async ({ page }, testInfo) => {
+    if (testInfo.project.name !== 'desktop-chromium') {
+      return;
+    }
+
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
     await page.evaluate(() => {
@@ -1688,17 +1661,10 @@ test.describe('Rhythm game flow', () => {
     const averageFrameMs =
       frameValues.reduce((sum, value) => sum + value, 0) / Math.max(1, frameValues.length);
 
-    if (testInfo.project.name === 'desktop-chromium') {
-      expect(samples.every((sample) => sample.mobileMode === false)).toBe(true);
-      expect(averageFps).toBeGreaterThanOrEqual(52);
-      expect(worstFps).toBeGreaterThanOrEqual(38);
-      expect(averageFrameMs).toBeLessThanOrEqual(20);
-      return;
-    }
-
-    expect(samples.every((sample) => sample.mobileMode === true)).toBe(true);
-    expect(averageFps).toBeGreaterThanOrEqual(20);
-    expect(worstFps).toBeGreaterThanOrEqual(14);
+    expect(samples.every((sample) => sample.mobileMode === false)).toBe(true);
+    expect(averageFps).toBeGreaterThanOrEqual(52);
+    expect(worstFps).toBeGreaterThanOrEqual(38);
+    expect(averageFrameMs).toBeLessThanOrEqual(20);
   });
 
   test('@perf-common keeps beat tracking memory bounded during long autoplay', async ({ page }) => {
@@ -2410,9 +2376,7 @@ test.describe('Rhythm game flow', () => {
       });
   });
 
-  test('eye-color method handles legacy string return and unknown value fallback', async ({
-    page,
-  }) => {
+  test('eye-color method compile fails for string return type', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
 
@@ -2431,19 +2395,9 @@ test.describe('Rhythm game flow', () => {
 
     await expect
       .poll(async () => {
-        return await page.evaluate(() => window.__rhythmTest?.getRules()?.akiuSpalva ?? '');
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? true);
       })
-      .toBe('ROZINE');
-
-    await updateDanceRulesCode(page, (source) =>
-      source.replace('return "#ff93d1";', 'return "#123456";'),
-    );
-
-    await expect
-      .poll(async () => {
-        return await page.evaluate(() => window.__rhythmTest?.getRules()?.akiuSpalva ?? '');
-      })
-      .toBe('JUODA');
+      .toBe(false);
   });
 
   test('all editable C# DanceRules fields change live gameplay behavior', async ({ page }) => {

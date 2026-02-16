@@ -124,12 +124,6 @@ Naudojami raktai:
   - saugo naujausią C# redaktoriaus turinį
   - redaguotas kodas išlieka po puslapio perkrovimo ir naujos versijos reload
 
-Legacy migracija:
-
-- `nida2026bday:puzzlesUnlocked:v1` nebenaudojamas kaip pagrindinė būsena
-- jei randamas su reikšme `1`, sistema automatiškai suteikia `5/5` progresą naujame rakte ir seną raktą pašalina
-- tai apsaugo nuo progreso praradimo pereinant iš senos sistemos
-
 ## Poraštė ir diagnostika
 
 `ℹ️ Papildoma informacija apie žaidimą` skiltyje yra:
@@ -184,7 +178,6 @@ Aktyvūs E2E profiliai:
 Pagrindinės E2E aprėptys:
 
 - misijų progresas per visus etapus (`0..5`), perkrovimai ir regresijos
-- legacy rakto migracija į naują progreso sistemą
 - pilnas reset ir tik C# kodo reset (įskaitant patvirtinimo frazes)
 - misijų atrakinimo „cheat“ dialogas (tik su teisingu kodu)
 - redaktoriaus kodo išsaugojimas/perkrovimas ir klaidų atkūrimas
@@ -237,7 +230,6 @@ Deploy eiga:
 ### 2026-02-16
 
 - Misijų progresas saugomas per-misiją rakte `nida2026bday:puzzlesSolvedCount:v1`
-- Legacy raktas `nida2026bday:puzzlesUnlocked:v1` migruojamas ir pašalinamas
 - Pridėta `Pavojinga zona` su pilnu reset, patvirtinimu (`yes reset`) ir puslapio perkrovimu
 - Pridėtas C# kodo išsaugojimas rakte `nida2026bday:editorSource:v1`
 - Pridėtas atskiras `reset code` srautas, kuris atstato tik C# kodą

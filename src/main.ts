@@ -373,7 +373,6 @@ const TOGGLE_LABEL_MAX_FONT_PX = 12;
 const TOGGLE_LABEL_MIN_FONT_PX = 8;
 const IS_COARSE_POINTER = window.matchMedia('(pointer: coarse)').matches;
 const MOBILE_PERF_MAX_WIDTH_PX = 900;
-const LEGACY_PUZZLE_UNLOCK_STORAGE_KEY = 'nida2026bday:puzzlesUnlocked:v1';
 const PUZZLE_PROGRESS_STORAGE_KEY = 'nida2026bday:puzzlesSolvedCount:v1';
 const SOUND_MUTED_STORAGE_KEY = 'nida2026bday:soundMuted:v1';
 const LOCAL_STORAGE_KEYS_USED = [
@@ -840,20 +839,6 @@ function writeSolvedPuzzleCount(next: number): void {
     window.localStorage.setItem(PUZZLE_PROGRESS_STORAGE_KEY, `${persistedSolvedPuzzleCount}`);
   } catch {
     // Ignore storage failures; mission progress still works in-memory.
-  }
-}
-
-function migrateLegacyPuzzleUnlock(): void {
-  try {
-    if (window.localStorage.getItem(LEGACY_PUZZLE_UNLOCK_STORAGE_KEY) !== '1') {
-      return;
-    }
-    if (persistedSolvedPuzzleCount < CODE_PUZZLES.length) {
-      writeSolvedPuzzleCount(CODE_PUZZLES.length);
-    }
-    window.localStorage.removeItem(LEGACY_PUZZLE_UNLOCK_STORAGE_KEY);
-  } catch {
-    // Ignore storage failures; game still works in-memory.
   }
 }
 
@@ -2598,12 +2583,6 @@ function resetGameProgressToDefaults(): void {
   soundMuted = false;
   audio.setMuted(false);
   writeSoundMuted(false);
-  try {
-    window.localStorage.removeItem(LEGACY_PUZZLE_UNLOCK_STORAGE_KEY);
-  } catch {
-    // Ignore storage failures.
-  }
-
   autoplayEnabled = true;
   renderAutoplayUiState();
   renderSoundUiState();
@@ -3179,7 +3158,6 @@ window.__rhythmTest = {
 async function bootstrapGame(): Promise<void> {
   await compiler.init();
   persistedSolvedPuzzleCount = readSolvedPuzzleCount();
-  migrateLegacyPuzzleUnlock();
   soundMuted = readSoundMuted();
   audio.setMuted(soundMuted);
   persistEditorSource(INITIAL_EDITOR_SOURCE);

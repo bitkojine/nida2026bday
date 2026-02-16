@@ -167,12 +167,6 @@ function parseEnumFieldStrict(
     };
   }
 
-  const legacyStringRegex = new RegExp(`public\\s+string\\s+${field}\\s*=\\s*"([^"]+)"\\s*;`, 'i');
-  const legacyStringMatch = source.match(legacyStringRegex);
-  if (legacyStringMatch) {
-    return { kind: 'ok', value: legacyStringMatch[1] };
-  }
-
   const looseRegex = new RegExp(`public\\s+[A-Za-z_]\\w*\\s+${field}\\s*=`, 'i');
   if (looseRegex.test(source)) {
     return {
@@ -194,15 +188,6 @@ function parseEyeColorMethodStrict(source: string): ParseStatus<HorseColorName> 
     return { kind: 'ok', value: DEFAULT_RULES.akiuSpalva };
   }
 
-  const legacyString = parseStringMethodReturnByNames(source, 'AkiuSpalva');
-  if (legacyString !== null) {
-    const mappedLegacy = mapLegacyHexToColorName(legacyString);
-    if (mappedLegacy) {
-      return { kind: 'ok', value: mappedLegacy };
-    }
-    return { kind: 'ok', value: DEFAULT_RULES.akiuSpalva };
-  }
-
   if (hasMethod) {
     return {
       kind: 'invalid',
@@ -211,57 +196,6 @@ function parseEyeColorMethodStrict(source: string): ParseStatus<HorseColorName> 
   }
 
   return { kind: 'missing' };
-}
-
-function mapLegacyHexToColorName(value: string): HorseColorName | null {
-  const legacyHex = value.toLowerCase();
-  if (legacyHex === '#d6b48a') {
-    return 'SMELIO';
-  }
-  if (legacyHex === '#7d4f2d') {
-    return 'TAMSIAI_RUDA';
-  }
-  if (legacyHex === '#2b1f12') {
-    return 'JUODA';
-  }
-  if (legacyHex === '#ff8b3d' || legacyHex === '#ff9f66' || legacyHex === '#ffc48d') {
-    return 'ORANZINE';
-  }
-  if (legacyHex === '#3366cc' || legacyHex === '#1a8cff' || legacyHex === '#9fc6e8') {
-    return 'MELYNA';
-  }
-  if (legacyHex === '#ff93d1') {
-    return 'ROZINE';
-  }
-  if (legacyHex === '#ffcc00' || legacyHex === '#f5a300' || legacyHex === '#587087') {
-    return 'AUKSINE';
-  }
-  if (legacyHex === '#7f2cff') {
-    return 'VIOLETINE';
-  }
-  if (legacyHex === '#36597a' || legacyHex === '#2b3c54') {
-    return 'RUDA';
-  }
-  if (legacyHex === '#d7ecff') {
-    return 'BALTA';
-  }
-
-  return null;
-}
-
-function parseStringMethodReturnByNames(source: string, ...methods: string[]): string | null {
-  for (const method of methods) {
-    const methodRegex = new RegExp(
-      `public\\s+string\\s+${method}\\s*\\(\\s*\\)\\s*\\{[\\s\\S]*?return\\s+"([^"]+)"\\s*;[\\s\\S]*?\\}`,
-      'i',
-    );
-    const match = source.match(methodRegex);
-    if (match) {
-      return match[1];
-    }
-  }
-
-  return null;
 }
 
 function parseEnumMethodReturnByNames(source: string, ...methods: string[]): string | null {
@@ -466,15 +400,11 @@ export class CodeCompilerService {
 
     const arklioSpalvaParsed =
       arklioSpalvaRaw.kind === 'ok'
-        ? HORSE_COLOR_NAMES.includes(arklioSpalvaRaw.value as HorseColorName)
-          ? (arklioSpalvaRaw.value as HorseColorName)
-          : (mapLegacyHexToColorName(arklioSpalvaRaw.value) ?? DEFAULT_RULES.arklioSpalva)
+        ? (arklioSpalvaRaw.value as HorseColorName)
         : DEFAULT_RULES.arklioSpalva;
     const karciuSpalvaParsed =
       karciuSpalvaRaw.kind === 'ok'
-        ? HORSE_COLOR_NAMES.includes(karciuSpalvaRaw.value as HorseColorName)
-          ? (karciuSpalvaRaw.value as HorseColorName)
-          : (mapLegacyHexToColorName(karciuSpalvaRaw.value) ?? DEFAULT_RULES.karciuSpalva)
+        ? (karciuSpalvaRaw.value as HorseColorName)
         : DEFAULT_RULES.karciuSpalva;
 
     const draft: DanceRules = {
