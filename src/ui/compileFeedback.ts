@@ -6,6 +6,7 @@ export interface CompileServiceLike {
 
 export interface CompileFeedbackSinks {
   setRules(next: DanceRules): void;
+  setCompileValidity?(isValid: boolean, result: CompileResult): void;
 }
 
 export function applyCompileResult(
@@ -14,6 +15,7 @@ export function applyCompileResult(
   sinks: CompileFeedbackSinks,
 ): void {
   const result = compiler.compile(source);
+  sinks.setCompileValidity?.(result.success, result);
   if (result.success) {
     sinks.setRules(result.rules);
   }

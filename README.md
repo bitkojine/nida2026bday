@@ -1,159 +1,230 @@
-# Nidos gimtadienio ritmo žaidimas (GitHub Pages, static)
+# Nidos gimtadienio ritmo žaidimas
 
-Mobile-first ritmo žaidimas su gyvu C# taisyklių redagavimu naršyklėje.  
-Pirminis taikinys: iPhone Safari. Taip pat veikia desktop naršyklėse.
+Mobile-first ritmo žaidimas su gyvu C# taisyklių redagavimu naršyklėje.
 
-## Kas čia yra
+- Pirminis taikinys: iPhone Safari
+- Taip pat palaikoma: desktop Chrome/Safari/Edge (per Chromium/WebKit testus)
+- Deploy: statinis build į GitHub Pages
 
-- 4 juostų ritmo trasa su rodyklių valdymu (`← ↓ ↑ →`)
-- C# studija žaidimo taisyklėms keisti realiu laiku
-- Keičiamo aukščio C# redaktorius (apatinis dešinys kampas, tempimas aukštyn/žemyn)
-- Mokymosi misijos (`0/5` -> `5/5`) su nuolat išsaugomu šablonų atrakinimo atlygiu
-- Šokantis arklys (`canvas`) su spalvų, kepurių ir oro efektų valdymu per C#
-- Gyvi našumo rodikliai poraštėje (lietuviški: `kadr./s`, `ms`, atmintis, garso balsai, dalelės)
-- Garso vizualizatorius poraštėje (veikia ir kai garsas nutildytas)
-- Lietuviška UI ir dedikacija:
-  - `Skirta Nidai – nuo Roberto. Su gimtadieniu! 🎉`
-  - rodoma iškart po pagrindiniu pavadinimu
+## Turinys
 
-## Technologijos
+- [Greita pradžia](#greita-pradžia)
+- [Kas įgyvendinta](#kas-įgyvendinta)
+- [Kaip žaisti](#kaip-žaisti)
+- [C# redagavimo kontraktas](#c-redagavimo-kontraktas)
+- [Šablonai](#šablonai)
+- [Išsaugojimas localStorage](#išsaugojimas-localstorage)
+- [Poraštė ir diagnostika](#poraštė-ir-diagnostika)
+- [Testavimas](#testavimas)
+- [Skriptai](#skriptai)
+- [Deploy](#deploy)
+- [Projekto struktūra](#projekto-struktūra)
+- [Pokyčių žurnalas](#pokyčių-žurnalas)
 
-- TypeScript (`strict` įjungtas)
-- Vite
-- Vitest + Coverage (`@vitest/coverage-v8`)
-- Playwright (desktop + iPhone profiliai)
-- Monaco Editor
-- Canvas renderinimas
-- C# taisyklių vykdymas per `.NET WASM` bandymą su saugiu fallback parseriu
+## Greita pradžia
 
-## Paleidimas lokaliai
+Reikalavimai:
+
+- `Node.js` 20+
+- `npm`
+
+Paleidimas:
 
 ```bash
 npm install
 npm run dev
 ```
 
-Atidaryk adresą iš terminalo (`vite` output), dažniausiai `http://127.0.0.1:5173`.
+Build ir preview:
+
+```bash
+npm run build
+npm run preview
+```
+
+## Kas įgyvendinta
+
+- 4 juostų ritmo žaidimas (`← ↓ ↑ →`) su rankiniu valdymu ir autoplay
+- C# studija su gyvu taisyklių pritaikymu
+- Keičiamo aukščio kodo langas su apsauga nuo nekontroliuojamo auto-didėjimo
+- 5 mokymosi misijos su nuolat išsaugomu progresu (`0/5` -> `5/5`)
+- Šablonų mygtukų atrakinimas po visų misijų
+- Arklio vaizdo keitimai per C#:
+  - kūno, karčių ir akių spalva
+  - kepurė ir kepurės tipas
+  - oro efektas (saulėta/lietinga/sniegas/žaibas)
+- Vieningas oro fono renderis:
+  - mažame arklio vaizde
+  - dideliame puslapio fone
+- `Pavojinga zona` poraštėje:
+  - pilnas žaidimo reset (misijos, garsas, C# kodas ir susijusi būsena)
+  - privalomas patvirtinimas su tekstu `yes reset`
+  - po reset atliekamas programos perkrovimas
+  - atskiras „tik C# kodo“ reset su patvirtinimu `reset code` (be progreso/garso atstatymo ir be perkrovimo)
+- Našumo ir saugyklos diagnostika poraštėje su stabilia „placeholder“ įkrovos būsena
 
 ## Kaip žaisti
 
-1. Atidaryk žaidimą, jis startuoja iškart (be splash/start ekranų).
-2. Spausk rodyklių mygtukus apačioje (`← ↓ ↑ →`) kai nata kerta `hit` liniją.
+1. Atidaryk puslapį, žaidimas startuoja iš karto.
+2. Spausk rodyklių mygtukus kai natos kerta hit liniją.
 3. Atverk `C# studija: keisk žaidimo taisykles`.
-4. Keisk C# laukus, pvz.:
-   - `tobulasLangas`, `gerasLangas`
-   - `tobuliTaskai`, `geriTaskai`
-   - `serijaIkiUzsivedimo`
-   - `arklioSpalva`, `karciuSpalva`
-   - `suKepure`, `kepuresTipas`, `oroEfektas`
-5. Pakeitimai pritaikomi automatiškai po trumpos akimirkos.
+4. Redaguok C# ir stebėk pokyčius realiu laiku.
+5. Eik per misijas nuo `1 / 5` iki `5 / 5` ir atrakink šablonus.
 
-### Misijos ir atlygis
+## C# redagavimo kontraktas
 
-- Misijų kortelė visada rodoma virš C# redaktoriaus.
-- Įvykdžius visas 5 misijas, atrakini C# šablonų mygtukus.
-- Atrakinta būsena išsaugoma naršyklės `localStorage` rakte `nida2026bday:puzzlesUnlocked:v1`, todėl šablonai lieka atrakinti ir po puslapio perkrovimo.
-- Garso nutildymo būsena (`Garsas: ĮJUNGTAS/IŠJUNGTAS`) išsaugoma rakte `nida2026bday:soundMuted:v1`, todėl po perkrovimo išlieka paskutinis pasirinkimas.
+Žaidime rodoma C# klasė su enum reikšmėmis ir laukais, kuriuos galima keisti. Dabartinis šablonas:
 
-Jei matai klaidą po redagavimo:
+- `KepuresTipas`: `KLASIKINE`, `KAUBOJAUS`, `KARUNA`, `RAGANOS`
+- `OroEfektas`: `SAULETA`, `LIETINGA`, `SNIEGAS`, `ZAIBAS`
+- `Spalva`: `SMELIO`, `TAMSIAI_RUDA`, `RUDA`, `JUODA`, `BALTA`, `AUKSINE`, `ROZINE`, `MELYNA`, `ZALIA`, `VIOLETINE`, `ORANZINE`
 
-1. Patikrink, ar neužmiršai kabliataškio `;`.
-2. Patikrink, ar visi skliaustai `{ }` uždaryti poromis.
-3. Redaguok tik pažymėtą `GALI KEISTI` sritį.
-4. Po pakeitimo palauk trumpai (apie `0.1-0.2 s`), kol taisyklės persikompiliuos.
+Keičiami laukai/metodas:
 
-## Testai
+- `tobulasLangas`
+- `gerasLangas`
+- `tobuliTaskai`
+- `geriTaskai`
+- `serijaIkiUzsivedimo`
+- `arklioSpalva`
+- `karciuSpalva`
+- `suKepure`
+- `kepuresTipas`
+- `oroEfektas`
+- `AkiuSpalva()`
 
-### Unit + coverage
+Pastaba: parseris palaiko ir enum reikšmes be tipo prefikso (pvz. `KARUNA`), bet rekomenduojamas pilnas variantas (pvz. `KepuresTipas.KARUNA`) dėl aiškumo.
+
+## Šablonai
+
+- Yra 6 šablonai greitam eksperimentavimui po visų misijų įvykdymo.
+- Šablonai keičia visą redaguojamą taisyklių rinkinį (langus, taškus, hype slenkstį, spalvas, kepurę, orą ir akių spalvą).
+- Šablonai įrašomi kaip redaktoriaus kodas, todėl jų efektas išlieka po perkrovimo.
+
+## Išsaugojimas localStorage
+
+Naudojami raktai:
+
+- `nida2026bday:puzzlesSolvedCount:v1`
+  - saugo kiek misijų jau įvykdyta (`0..5`)
+- `nida2026bday:soundMuted:v1`
+  - saugo garso būseną (`1` arba nėra rakto)
+- `nida2026bday:editorSource:v1`
+  - saugo naujausią C# redaktoriaus turinį
+  - redaguotas kodas išlieka po puslapio perkrovimo ir naujos versijos reload
+
+Legacy migracija:
+
+- `nida2026bday:puzzlesUnlocked:v1` nebenaudojamas kaip pagrindinė būsena
+- jei randamas su reikšme `1`, sistema automatiškai suteikia `5/5` progresą naujame rakte ir seną raktą pašalina
+- tai apsaugo nuo progreso praradimo pereinant iš senos sistemos
+
+## Poraštė ir diagnostika
+
+`ℹ️ Papildoma informacija apie žaidimą` skiltyje yra:
+
+- garso vizualizatorius
+- našumo statistika (`kadr./s`, kadro laikas, atmintis, natos, dalelės, garso balsai)
+- vietinės saugyklos diagnostika:
+  - raktų kiekis
+  - mūsų raktų būsena
+  - apytikslis užimtumas
+  - naršyklės `storage estimate` jei prieinama
+  - visų mūsų raktų reikšmės; C# kodo raktui rodoma tik eilučių skaičiaus santrauka
+- `Pavojinga zona` su dviem atstatymo režimais:
+  - pilnas žaidimo reset (`yes reset`) + puslapio perkrovimas
+  - tik C# kodo reset (`reset code`)
+
+Įkrovos būsena:
+
+- statistika turi fiksuotą eilučių struktūrą nuo pirmo renderio
+- kol duomenys ruošiami, rodomi aiškūs `tikrinama...` placeholder elementai
+- dėl to turinys „nešokinėja“ tarp eilučių skaičiaus
+
+## Testavimas
+
+Unit + coverage:
 
 ```bash
 npm run test
 ```
 
-### E2E
+E2E (Playwright):
 
 ```bash
 npx playwright install chromium webkit
 npm run test:e2e
 ```
 
-E2E projektai:
-
-- `iphone-12-pro-max` (`WebKit`, iPhone 12 Pro Max profilis)
-- `iphone-15-pro` (`WebKit`, iPhone 15 Pro profilis)
-- `desktop-chromium` (`Chromium`, Desktop Chrome profilis)
-
-### Viskas (typecheck + unit + e2e)
+Pilnas paketas (`typecheck + unit + e2e`):
 
 ```bash
 npm run test:all
 ```
 
-## Kiti naudingi skriptai
+Aktyvūs E2E profiliai:
+
+- `desktop-chromium`
+- `iphone-12-pro-max` (WebKit)
+- `iphone-15-pro` (WebKit)
+
+Pagrindinės E2E aprėptys:
+
+- misijų progresas per visus etapus (`0..5`), perkrovimai ir regresijos
+- legacy rakto migracija į naują progreso sistemą
+- pilnas reset ir tik C# kodo reset (įskaitant patvirtinimo frazes)
+- redaktoriaus kodo išsaugojimas/perkrovimas ir klaidų atkūrimas
+- iPhone landscape/portrait ir desktop išdėstymo stabilumas
+- oro fono (mažo + didelio) renderio stabilumas ir ribiniai atvejai
+
+## Skriptai
 
 ```bash
+npm run dev
+npm run typecheck
 npm run lint
 npm run format
+npm run test
+npm run test:watch
+npm run test:e2e
+npm run test:all
+npm run check
 npm run build
 npm run preview
 ```
 
-## GitHub Actions / Deploy
+## Deploy
 
 Workflow failai:
 
-- `.github/workflows/deploy-pages.yml` - build + deploy į GitHub Pages
-- `.github/workflows/e2e.yml` - atskiras E2E pipeline (Chromium + WebKit)
+- `.github/workflows/deploy-pages.yml` - build/deploy į GitHub Pages
+- `.github/workflows/e2e.yml` - atskiras E2E pipeline
 
-Deploy modelis:
+Deploy eiga:
 
-1. Push į `main` paleidžia `deploy-pages` workflow.
-2. Statinis build (`dist/`) publikuojamas per GitHub Pages Actions.
-3. E2E workflow yra atskiras ir neužblokuoja deploy artefakto generavimo.
+1. Push į `main`
+2. Generuojamas statinis build (`dist/`)
+3. Artifact publikuojamas per GitHub Pages
 
-## Home Screen (iPhone)
+## Projekto struktūra
 
-- Pridėtas `site.webmanifest` ir iOS `apple-touch-icon`.
-- Home Screen pavadinimas: `Arklio Ritmas`.
-- Naudojama brandinta ikona iš `public/icons/`.
+- `src/core` - ritmo, timing, scoring logika ir tipai
+- `src/services` - C# kompiliavimo/runtime sluoksnis
+- `src/render` - arklio ir oro efektų renderinimas
+- `src/ui` - misijos, šablonai, editoriaus UX
+- `src/main.ts` - app bootstrap, wiring, state orchestration
+- `tests` - Vitest vienetiniai testai
+- `e2e` - Playwright scenarijai
+- `specs` - modulių specifikacijos
 
-## Poraštė ir diagnostika
+## Pokyčių žurnalas
 
-- Poraštėje rodoma papildoma informacija apie žaidimą ir našumą (lietuviškai, po vieną rodiklį eilutėje, kad išdėstymas nešokinėtų).
-- Rodomas build numeris pagal Lietuvos laiką.
-- Jei atminties API naršyklėje neprieinama, rodomas tekstas `neprieinama`.
-- `localStorage` diagnostikoje rodoma:
-  - ar saugykla prieinama,
-  - bendras raktų kiekis,
-  - mūsų raktų (`nida2026bday:puzzlesUnlocked:v1`, `nida2026bday:soundMuted:v1`) būsena ir reikšmė,
-  - apytikslis saugyklos užimtumas,
-  - naršyklės `storage estimate` (`usage/quota`), jei API prieinama.
+### 2026-02-16
 
-## Architektūra
-
-- `src/core/` - deterministinė ritmo/scoring/timing logika
-- `src/services/` - C# compile/runtime/fallback sluoksnis
-- `src/render/` - arklio animatorius ir efektai
-- `src/ui/` - editorius, šablonai, misijos, redagavimo UX
-- `specs/` - spec-driven modulio kontraktai
-- `tests/` - Vitest testai
-- `e2e/` - Playwright scenarijai
-
-## Mobile-first sprendimai
-
-- Touch-first UI, be hover priklausomybės
-- Safe-area palaikymas (`viewport-fit=cover`, `env(safe-area-inset-*)`)
-- iPhone fokusavimo zoom prevencija redaktoriuje (no-zoom viewport + mobile editor font sizing)
-- Optimizuotas iPhone landscape išdėstymas (safe-area + sumažinti aukščiai, kad viskas tilptų patogiai)
-- Adaptyvus vizualinis FPS mobiliuose:
-  - autoplay: ~36 kadr./s
-  - manual: ~45 kadr./s
-  - desktop: ~60 kadr./s
-- `requestAnimationFrame` renderis ir lengvos animacijos
-
-## Pastabos apie C# runtime
-
-- Pirmiausia bandoma `.NET WASM` aplinka naršyklėje.
-- Jei nepavyksta, įjungiamas suderinamas fallback režimas.
-- Abiem režimais žaidimo taisyklės atsinaujina gyvai.
-- Runtime režimo detalės žaidimo UI nebenerodomos (palikta kaip techninė informacija README faile).
+- Misijų progresas saugomas per-misiją rakte `nida2026bday:puzzlesSolvedCount:v1`
+- Legacy raktas `nida2026bday:puzzlesUnlocked:v1` migruojamas ir pašalinamas
+- Pridėta `Pavojinga zona` su pilnu reset, patvirtinimu (`yes reset`) ir puslapio perkrovimu
+- Pridėtas C# kodo išsaugojimas rakte `nida2026bday:editorSource:v1`
+- Pridėtas atskiras `reset code` srautas, kuris atstato tik C# kodą
+- Suvienodintas mažo ir didelio oro fono renderinimas
+- Poraštės statistika atnaujinta su fiksuota placeholder įkrovos būsena

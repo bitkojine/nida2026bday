@@ -18,11 +18,16 @@ describe('compileFeedback', () => {
       compile: vi.fn(() => okResult()),
     };
     const setRules = vi.fn();
+    const setCompileValidity = vi.fn();
 
-    applyCompileResult('code', compiler, { setRules });
+    applyCompileResult('code', compiler, { setRules, setCompileValidity });
 
     expect(compiler.compile).toHaveBeenCalledWith('code');
     expect(setRules).toHaveBeenCalledTimes(1);
+    expect(setCompileValidity).toHaveBeenCalledWith(
+      true,
+      expect.objectContaining({ success: true }),
+    );
   });
 
   it('keeps previous rules on compiler failure', () => {
@@ -37,10 +42,15 @@ describe('compileFeedback', () => {
       ),
     };
     const setRules = vi.fn();
+    const setCompileValidity = vi.fn();
 
-    applyCompileResult('bad', compiler, { setRules });
+    applyCompileResult('bad', compiler, { setRules, setCompileValidity });
 
     expect(setRules).not.toHaveBeenCalled();
+    expect(setCompileValidity).toHaveBeenCalledWith(
+      false,
+      expect.objectContaining({ success: false }),
+    );
   });
 
   it('runs compile immediately in fallback editor setup', () => {

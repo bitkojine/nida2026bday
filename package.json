@@ -18,7 +18,9 @@
   },
   "dependencies": {
     "@monaco-editor/loader": "^1.7.0",
-    "monaco-editor": "^0.55.1"
+    "monaco-editor": "^0.55.1",
+    "tree-sitter-c-sharp": "^0.23.1",
+    "web-tree-sitter": "^0.26.5"
   },
   "devDependencies": {
     "@playwright/test": "^1.58.2",

@@ -7,15 +7,15 @@ describe('CodeCompilerService', () => {
     const service = new CodeCompilerService();
     const result = service.compile(
       CSHARP_TEMPLATE.replace('0.05f', '0.08f')
-        .replace('"#d6b48a"', '"#112233"')
+        .replace('Spalva.SMELIO', 'Spalva.MELYNA')
         .replace('false;', 'true;')
-        .replace('"KLASIKINE"', '"KAUBOJAUS"')
-        .replace('"SAULETA"', '"ZAIBAS"'),
+        .replace('KepuresTipas.KLASIKINE', 'KepuresTipas.KAUBOJAUS')
+        .replace('OroEfektas.SAULETA', 'OroEfektas.ZAIBAS'),
     );
 
     expect(result.success).toBe(true);
     expect(result.rules.tobulasLangas).toBe(0.08);
-    expect(result.rules.arklioSpalva).toBe('#112233');
+    expect(result.rules.arklioSpalva).toBe('MELYNA');
     expect(result.rules.suKepure).toBe(true);
     expect(result.rules.kepuresTipas).toBe('KAUBOJAUS');
     expect(result.rules.oroEfektas).toBe('ZAIBAS');
@@ -24,6 +24,16 @@ describe('CodeCompilerService', () => {
   it('returns translated error for missing class', () => {
     const service = new CodeCompilerService();
     const result = service.compile('public class SomethingElse {}');
+
+    expect(result.success).toBe(false);
+    expect(result.errors[0]).toContain('pavadinimas');
+  });
+
+  it('fails compile when class declaration keyword is broken', () => {
+    const service = new CodeCompilerService();
+    const result = service.compile(
+      CSHARP_TEMPLATE.replace('public class DanceRules', 'publik class DanceRules'),
+    );
 
     expect(result.success).toBe(false);
     expect(result.errors[0]).toContain('pavadinimas');
@@ -40,16 +50,153 @@ describe('CodeCompilerService', () => {
     const service = new CodeCompilerService();
     const edited = CSHARP_TEMPLATE.replace('100;', '99999;')
       .replace('10;', '1;')
-      .replace('"#d6b48a"', '"pink"')
-      .replace('"KLASIKINE"', '"PIRATAS"')
-      .replace('"SAULETA"', '"AUDRA"');
+      .replace('50;', '2;');
 
     const result = service.compile(edited);
     expect(result.success).toBe(true);
     expect(result.rules.tobuliTaskai).toBe(1000);
+    expect(result.rules.geriTaskai).toBe(5);
     expect(result.rules.serijaIkiHype).toBe(2);
-    expect(result.rules.arklioSpalva).toBe('#d6b48a');
-    expect(result.rules.kepuresTipas).toBe('KLASIKINE');
-    expect(result.rules.oroEfektas).toBe('SAULETA');
+  });
+
+  it('accepts enum-based assignments for hat and weather', () => {
+    const service = new CodeCompilerService();
+    const edited = CSHARP_TEMPLATE.replace(
+      'public KepuresTipas kepuresTipas = KepuresTipas.KLASIKINE;',
+      'public KepuresTipas kepuresTipas = KepuresTipas.KARUNA;',
+    ).replace(
+      'public OroEfektas oroEfektas = OroEfektas.SAULETA;',
+      'public OroEfektas oroEfektas = OroEfektas.SNIEGAS;',
+    );
+
+    const result = service.compile(edited);
+    expect(result.success).toBe(true);
+    expect(result.rules.kepuresTipas).toBe('KARUNA');
+    expect(result.rules.oroEfektas).toBe('SNIEGAS');
+  });
+
+  it('reads eye color from editable method and falls back for unknown enum value', () => {
+    const service = new CodeCompilerService();
+    const coloredEyes = CSHARP_TEMPLATE.replace('return Spalva.JUODA;', 'return Spalva.ROZINE;');
+    const invalidEyes = CSHARP_TEMPLATE.replace('return Spalva.JUODA;', 'return Spalva.NEON;');
+
+    const ok = service.compile(coloredEyes);
+    expect(ok.success).toBe(true);
+    expect(ok.rules.akiuSpalva).toBe('ROZINE');
+
+    const bad = service.compile(invalidEyes);
+    expect(bad.success).toBe(true);
+    expect(bad.rules.akiuSpalva).toBe('JUODA');
+  });
+
+  it('supports legacy string eye-color method and maps known hex values', () => {
+    const service = new CodeCompilerService();
+    const legacyMethod = CSHARP_TEMPLATE.replace(
+      `public Spalva AkiuSpalva()
+    {
+        return Spalva.JUODA;
+    }`,
+      `public string AkiuSpalva()
+    {
+        return "#ff93d1";
+    }`,
+    );
+
+    const result = service.compile(legacyMethod);
+    expect(result.success).toBe(true);
+    expect(result.rules.akiuSpalva).toBe('ROZINE');
+  });
+
+  it('falls back for unknown legacy eye-color string and fails only malformed methods', () => {
+    const service = new CodeCompilerService();
+    const unknownLegacy = CSHARP_TEMPLATE.replace(
+      `public Spalva AkiuSpalva()
+    {
+        return Spalva.JUODA;
+    }`,
+      `public string AkiuSpalva()
+    {
+        return "#123456";
+    }`,
+    );
+    const missingReturn = CSHARP_TEMPLATE.replace(
+      'return Spalva.JUODA;',
+      '// no return here on purpose',
+    );
+
+    expect(service.compile(unknownLegacy).success).toBe(true);
+    expect(service.compile(unknownLegacy).rules.akiuSpalva).toBe('JUODA');
+    expect(service.compile(missingReturn).success).toBe(false);
+  });
+
+  it('accepts enum members without type prefix for fields and eye-color method', () => {
+    const service = new CodeCompilerService();
+    const edited = CSHARP_TEMPLATE.replace(
+      'public Spalva arklioSpalva = Spalva.SMELIO;',
+      'public Spalva arklioSpalva = MELYNA;',
+    )
+      .replace(
+        'public KepuresTipas kepuresTipas = KepuresTipas.KLASIKINE;',
+        'public KepuresTipas kepuresTipas = KARUNA;',
+      )
+      .replace(
+        'public OroEfektas oroEfektas = OroEfektas.SAULETA;',
+        'public OroEfektas oroEfektas = SNIEGAS;',
+      )
+      .replace('return Spalva.JUODA;', 'return ROZINE;');
+
+    const result = service.compile(edited);
+    expect(result.success).toBe(true);
+    expect(result.rules.arklioSpalva).toBe('MELYNA');
+    expect(result.rules.kepuresTipas).toBe('KARUNA');
+    expect(result.rules.oroEfektas).toBe('SNIEGAS');
+    expect(result.rules.akiuSpalva).toBe('ROZINE');
+  });
+
+  it('fails compile for invalid enum members in fields', () => {
+    const service = new CodeCompilerService();
+    const edited = CSHARP_TEMPLATE.replace(
+      'public KepuresTipas kepuresTipas = KepuresTipas.KLASIKINE;',
+      'public KepuresTipas kepuresTipas = KepuresTipas.PIRATAS;',
+    ).replace(
+      'public OroEfektas oroEfektas = OroEfektas.SAULETA;',
+      'public OroEfektas oroEfektas = OroEfektas.AUDRA;',
+    );
+
+    const result = service.compile(edited);
+    expect(result.success).toBe(false);
+    expect(result.errors.join(' ')).toContain('kepuresTipas');
+    expect(result.errors.join(' ')).toContain('oroEfektas');
+  });
+
+  it('fails compile for malformed numeric and boolean field assignments', () => {
+    const service = new CodeCompilerService();
+    const edited = CSHARP_TEMPLATE.replace(
+      'public int geriTaskai = 50;',
+      'public int geriTaskai = abc;',
+    ).replace('public bool suKepure = false;', 'public bool suKepure = maybe;');
+
+    const result = service.compile(edited);
+    expect(result.success).toBe(false);
+    expect(result.errors.join(' ')).toContain('geriTaskai');
+    expect(result.errors.join(' ')).toContain('suKepure');
+  });
+
+  it('fails compile when enum syntax is broken (missing commas)', () => {
+    const service = new CodeCompilerService();
+    const edited = CSHARP_TEMPLATE.replace('SMELIO,', 'SMELIO');
+
+    const result = service.compile(edited);
+    expect(result.success).toBe(false);
+    expect(result.errors.join(' ')).toContain('Enum Spalva');
+  });
+
+  it('fails compile when required enum declaration keyword is broken', () => {
+    const service = new CodeCompilerService();
+    const edited = CSHARP_TEMPLATE.replace('public enum OroEfektas', 'pubic enum OroEfektas');
+
+    const result = service.compile(edited);
+    expect(result.success).toBe(false);
+    expect(result.errors.join(' ')).toContain('OroEfektas');
   });
 });
