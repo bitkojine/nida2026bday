@@ -11,10 +11,21 @@ concurrency:
   group: e2e-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   e2e:
+    name: E2E (${{ matrix.project }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        project:
+          - desktop-chromium
+          - iphone-12-pro-max
+          - iphone-15-pro
 
     steps:
       - name: Checkout
@@ -35,14 +46,14 @@ jobs:
       - name: Install Playwright browsers (Chromium + WebKit)
         run: npx playwright install --with-deps chromium webkit
 
-      - name: Run E2E tests
-        run: npm run test:e2e
+      - name: Run E2E tests for matrix project
+        run: npm run test:e2e -- --project="${{ matrix.project }}"
 
       - name: Upload Playwright report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report
+          name: playwright-report-${{ matrix.project }}
           path: playwright-report
           if-no-files-found: ignore
           retention-days: 7
