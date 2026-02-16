@@ -46,6 +46,32 @@ import { buildWrappedLineNumbers } from './ui/lineNumberGutter';
 import { mountMonacoEditor } from './ui/monacoEditor';
 
 declare const __BUILD_VILNIUS_TIME__: string;
+interface BuildGitLargestFile {
+  path: string;
+  bytes: number;
+}
+
+interface BuildGitHistoryChurnEntry {
+  path: string;
+  totalBytes: number;
+  blobCount: number;
+}
+
+interface BuildGitRepoStats {
+  available: boolean;
+  branch: string;
+  commit: string;
+  trackedFileCount: number;
+  gitDirBytes: number;
+  gitObjectCount: number | null;
+  gitLooseSizeBytes: number | null;
+  gitPackSizeBytes: number | null;
+  largestTrackedFiles: BuildGitLargestFile[];
+  historyChurn: BuildGitHistoryChurnEntry[];
+  error?: string;
+}
+
+declare const __GIT_REPO_STATS__: BuildGitRepoStats;
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
@@ -362,13 +388,13 @@ const EDITOR_PANEL_AUTOSIZE_FUDGE_PX = 2;
 const WEATHER_SCENE_MAX_DPR = 1.25;
 const WEATHER_SCENE_MAX_PIXELS = 2_200_000;
 const WEATHER_VISUAL_FPS_COARSE = 22;
-const WEATHER_VISUAL_FPS_FINE = 20;
+const WEATHER_VISUAL_FPS_FINE = 60;
 const AUDIO_VIZ_FPS_COARSE = 28;
-const AUDIO_VIZ_FPS_FINE = 30;
+const AUDIO_VIZ_FPS_FINE = 60;
 const HORSE_VISUAL_FPS_COARSE = 34;
-const HORSE_VISUAL_FPS_FINE = 45;
+const HORSE_VISUAL_FPS_FINE = 60;
 const LANE_VISUAL_FPS_COARSE = 34;
-const LANE_VISUAL_FPS_FINE = 36;
+const LANE_VISUAL_FPS_FINE = 60;
 const COMPILE_NOTICE_RAIL_MIN_WIDTH_PX = 1080;
 
 let rules: DanceRules = DEFAULT_RULES;
@@ -420,6 +446,8 @@ let autoplayEnabled = true;
 let soundMuted = false;
 let compileIsValid = true;
 let latestCompileResult: CompileResult | null = null;
+let cachedTechnicalNoticeSignature = '';
+let cachedTechnicalNoticeLines: string[] | null = null;
 let technicalNoticeExpanded = false;
 let weatherTechnicalNoticeIconHit: TechnicalNoticeIconHit | null = null;
 let pendingEditorSource: string | null = null;
@@ -431,13 +459,30 @@ const ensureTrailingEmptyLine = (source: string): string => {
   const withoutTrailingBreaks = source.replace(/[\r\n]+$/g, '');
   return `${withoutTrailingBreaks}\n`;
 };
+
+function readBrowserLocalStorageOrNull(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
 function readInitialEditorSource(): string {
   const fallback = ensureTrailingEmptyLine(CSHARP_TEMPLATE);
-  return ensureTrailingEmptyLine(readPersistedEditorSource(window.localStorage, fallback));
+  const storage = readBrowserLocalStorageOrNull();
+  if (!storage) {
+    return fallback;
+  }
+  return ensureTrailingEmptyLine(readPersistedEditorSource(storage, fallback));
 }
 
 function persistEditorSource(source: string): void {
-  writePersistedEditorSource(window.localStorage, ensureTrailingEmptyLine(source));
+  const storage = readBrowserLocalStorageOrNull();
+  if (!storage) {
+    return;
+  }
+  writePersistedEditorSource(storage, ensureTrailingEmptyLine(source));
 }
 
 const INITIAL_EDITOR_SOURCE = readInitialEditorSource();
@@ -632,6 +677,8 @@ function applyGlobalWeatherTheme(weather: string): void {
 function setCompileValidityState(isValid: boolean, result: CompileResult): void {
   const wasValid = compileIsValid;
   latestCompileResult = result;
+  cachedTechnicalNoticeSignature = '';
+  cachedTechnicalNoticeLines = null;
   compileIsValid = isValid;
   if (isValid) {
     technicalNoticeExpanded = false;
@@ -645,6 +692,15 @@ function setCompileValidityState(isValid: boolean, result: CompileResult): void 
 
 function buildTechnicalCompileNoticeLines(): string[] {
   const result = latestCompileResult;
+  const signature = JSON.stringify({
+    mode: result?.mode ?? null,
+    syntaxEngine: result?.syntaxEngine ?? null,
+    success: result?.success ?? null,
+    firstError: result?.errors?.[0] ?? null,
+  });
+  if (cachedTechnicalNoticeLines !== null && cachedTechnicalNoticeSignature === signature) {
+    return cachedTechnicalNoticeLines;
+  }
   const syntaxLine =
     result?.syntaxEngine === 'tree-sitter-wasm'
       ? 'Tree-sitter C# (WASM) sintaksės analizatorius aktyvus.'
@@ -655,7 +711,8 @@ function buildTechnicalCompileNoticeLines(): string[] {
       : 'Atsarginis tikrinimo režimas (dalis WASM komponentų nepasiekiama).';
   const statusLine = result?.success ? 'Kodas sukompiliuotas.' : 'Kodas nesikompiliuoja.';
   const errorLine = result?.errors[0] ?? 'Nenurodyta.';
-  return [
+  cachedTechnicalNoticeSignature = signature;
+  cachedTechnicalNoticeLines = [
     'KODAS NESIKOMPILIUOJA',
     '',
     '1) Sintaksės tikrinimas',
@@ -674,6 +731,7 @@ function buildTechnicalCompileNoticeLines(): string[] {
     '5) Klaida',
     errorLine,
   ];
+  return cachedTechnicalNoticeLines;
 }
 
 function useDesktopCompileNoticeRail(): boolean {
@@ -1422,6 +1480,52 @@ function isMobilePerformanceMode(): boolean {
   return IS_COARSE_POINTER && window.innerWidth <= MOBILE_PERF_MAX_WIDTH_PX;
 }
 
+function summarizeRepoBloatSignal(stats: BuildGitRepoStats): string {
+  if (!stats.available) {
+    return 'neprieinama';
+  }
+  const churnBytes = stats.historyChurn.reduce((sum, entry) => sum + entry.totalBytes, 0);
+  if (stats.gitDirBytes < 10 * 1024 * 1024 && churnBytes < 5 * 1024 * 1024) {
+    return 'žemas';
+  }
+  if (stats.gitDirBytes < 30 * 1024 * 1024 && churnBytes < 15 * 1024 * 1024) {
+    return 'vidutinis';
+  }
+  return 'aukštas';
+}
+
+function buildGitDiagnosticsLines(): string[] {
+  const stats = __GIT_REPO_STATS__;
+  if (!stats.available) {
+    return [
+      'Git (repo): neprieinama',
+      `Git klaida: ${stats.error ?? 'nežinoma'}`,
+      'Repo bloat signalas: neprieinama',
+    ];
+  }
+
+  const lines = [
+    `Git šaka: ${stats.branch}`,
+    `Git commit: ${stats.commit}`,
+    `Sekami failai: ${stats.trackedFileCount}`,
+    `Git metaduomenų dydis (.git): ${formatStorageBytes(stats.gitDirBytes)}`,
+    `Git objektų kiekis: ${stats.gitObjectCount ?? 'neprieinama'}`,
+    `Git objektų vieta (loose/pack): ${stats.gitLooseSizeBytes === null || stats.gitPackSizeBytes === null ? 'neprieinama' : `${formatStorageBytes(stats.gitLooseSizeBytes)} / ${formatStorageBytes(stats.gitPackSizeBytes)}`}`,
+    'Didžiausi sekami failai (dabar):',
+    ...stats.largestTrackedFiles.map(
+      (entry) => `  - ${entry.path}=${formatStorageBytes(entry.bytes)}`,
+    ),
+    'Didžiausias istorijos churn (per blob versijas):',
+    ...stats.historyChurn.map(
+      (entry) =>
+        `  - ${entry.path}=${formatStorageBytes(entry.totalBytes)} per ${entry.blobCount} blob vers.`,
+    ),
+    `Repo bloat signalas: ${summarizeRepoBloatSignal(stats)}`,
+  ];
+
+  return lines;
+}
+
 function renderPerformanceStatsPanel(
   fpsText: string,
   frameTimeText: string,
@@ -1450,6 +1554,8 @@ function renderPerformanceStatsPanel(
     }),
     `Užimta (apytiksliai): ${perfLocalStorageStats.approxUsed}`,
     `Naršyklės saugykla: ${perfLocalStorageStats.browserStorage}`,
+    'Git diagnostika:',
+    ...buildGitDiagnosticsLines(),
   ];
   const formatStatLine = (line: string): string => {
     if (line.startsWith('  - ')) {
@@ -2476,7 +2582,10 @@ function unlockAllMissionsProgress(): void {
 }
 
 function resetEditorCodeToDefault(): void {
-  clearPersistedEditorSource(window.localStorage);
+  const storage = readBrowserLocalStorageOrNull();
+  if (storage) {
+    clearPersistedEditorSource(storage);
+  }
   writeEditorSource(CSHARP_TEMPLATE);
   document.querySelectorAll<HTMLButtonElement>('.template-btn').forEach((el) => {
     el.classList.remove('active');

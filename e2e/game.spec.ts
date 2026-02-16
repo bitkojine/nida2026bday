@@ -150,6 +150,37 @@ test.describe('Rhythm game flow', () => {
       .not.toBeNull();
   });
 
+  test('boots cleanly when localStorage access is blocked', async ({ page }) => {
+    await page.addInitScript(() => {
+      const blockedAccess = () => {
+        throw new DOMException('Blocked by browser policy', 'SecurityError');
+      };
+      try {
+        Object.defineProperty(window, 'localStorage', {
+          configurable: true,
+          get: blockedAccess,
+        });
+      } catch {
+        try {
+          Storage.prototype.getItem = blockedAccess;
+          Storage.prototype.setItem = blockedAccess;
+          Storage.prototype.removeItem = blockedAccess;
+        } catch {
+          // Ignore patch failures in restricted engines.
+        }
+      }
+    });
+
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await expect(page.locator('#heroCopy')).toContainText('🎁 Šokanti Arklio Ritmo Dovana');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readEditorSource() ?? '');
+      })
+      .toContain('public class DanceRules');
+  });
+
   test('mute button toggles sound state with Lithuanian labels', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
@@ -1629,6 +1660,45 @@ test.describe('Rhythm game flow', () => {
     expect([36, 45]).toContain(perf.visualCapFps);
     expect(perf.fps).toBeGreaterThanOrEqual(20);
     expect(perf.frameMs).toBeLessThanOrEqual(55);
+  });
+
+  test('@perf-common detects sustained FPS regressions on desktop', async ({ page }, testInfo) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(true);
+      window.__rhythmTest?.resetScore();
+    });
+
+    await page.waitForTimeout(3000);
+    const samples: Array<{ fps: number; frameMs: number; mobileMode: boolean }> = [];
+    for (let i = 0; i < 10; i += 1) {
+      const perf = await page.evaluate(() => window.__rhythmTest?.readPerformance() ?? null);
+      if (perf) {
+        samples.push(perf);
+      }
+      await page.waitForTimeout(1000);
+    }
+    expect(samples.length).toBeGreaterThanOrEqual(8);
+
+    const fpsValues = samples.map((sample) => sample.fps);
+    const frameValues = samples.map((sample) => sample.frameMs);
+    const averageFps = fpsValues.reduce((sum, value) => sum + value, 0) / fpsValues.length;
+    const worstFps = Math.min(...fpsValues);
+    const averageFrameMs =
+      frameValues.reduce((sum, value) => sum + value, 0) / Math.max(1, frameValues.length);
+
+    if (testInfo.project.name === 'desktop-chromium') {
+      expect(samples.every((sample) => sample.mobileMode === false)).toBe(true);
+      expect(averageFps).toBeGreaterThanOrEqual(52);
+      expect(worstFps).toBeGreaterThanOrEqual(38);
+      expect(averageFrameMs).toBeLessThanOrEqual(20);
+      return;
+    }
+
+    expect(samples.every((sample) => sample.mobileMode === true)).toBe(true);
+    expect(averageFps).toBeGreaterThanOrEqual(20);
+    expect(worstFps).toBeGreaterThanOrEqual(14);
   });
 
   test('@perf-common keeps beat tracking memory bounded during long autoplay', async ({ page }) => {
