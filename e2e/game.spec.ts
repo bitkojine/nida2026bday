@@ -1590,9 +1590,7 @@ test.describe('Rhythm game flow', () => {
     expect(layout.gameWidth).toBeLessThanOrEqual(viewportWidth + 1);
   });
 
-  test('desktop keeps stable near-60fps gameplay cadence', async ({ page }, testInfo) => {
-    test.skip(testInfo.project.name !== 'desktop-chromium', 'Desktop-only performance assertion');
-
+  test('@perf-common keeps stable gameplay cadence across projects', async ({ page }, testInfo) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
     await page.evaluate(() => {
@@ -1611,24 +1609,29 @@ test.describe('Rhythm game flow', () => {
         },
         { timeout: 10000 },
       )
-      .toMatchObject({ fps: expect.any(Number), visualCapFps: 60 });
+      .toMatchObject({ fps: expect.any(Number), visualCapFps: expect.any(Number) });
 
     const perf = await page.evaluate(() => window.__rhythmTest?.readPerformance() ?? null);
     expect(perf).not.toBeNull();
     if (!perf) {
       return;
     }
-    expect(perf.visualCapFps).toBe(60);
-    expect(perf.mobileMode).toBe(false);
-    expect(perf.fps).toBeGreaterThanOrEqual(40);
-    expect(perf.frameMs).toBeLessThanOrEqual(26);
+
+    if (testInfo.project.name === 'desktop-chromium') {
+      expect(perf.visualCapFps).toBe(60);
+      expect(perf.mobileMode).toBe(false);
+      expect(perf.fps).toBeGreaterThanOrEqual(40);
+      expect(perf.frameMs).toBeLessThanOrEqual(26);
+      return;
+    }
+
+    expect(perf.mobileMode).toBe(true);
+    expect([36, 45]).toContain(perf.visualCapFps);
+    expect(perf.fps).toBeGreaterThanOrEqual(20);
+    expect(perf.frameMs).toBeLessThanOrEqual(55);
   });
 
-  test('desktop keeps beat tracking memory bounded during long autoplay', async ({
-    page,
-  }, testInfo) => {
-    test.skip(testInfo.project.name !== 'desktop-chromium', 'Desktop-only leak assertion');
-
+  test('@perf-common keeps beat tracking memory bounded during long autoplay', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
     await page.evaluate(() => {
