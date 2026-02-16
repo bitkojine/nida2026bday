@@ -160,6 +160,7 @@ const silentAudio =
 const audio = new GameAudio(silentAudio);
 const HYPE_LABEL = 'UŽSIVEDĘS';
 const FOOTER_CREDITS_LINE = 'Sukurta su meile: Robertas Rudys, 2026 m.';
+const REPO_URL = 'https://github.com/bitkojine/nida2026bday';
 const HUD_VALUE_MAX_FONT_PX = 14;
 const HUD_VALUE_MIN_FONT_PX = 9;
 const IS_COARSE_POINTER = window.matchMedia('(pointer: coarse)').matches;
@@ -797,9 +798,9 @@ function updatePerformanceStats(nowMs: number): void {
     `Laikomos natos: ${audioStats.activeHoldVoices}`,
     `Vizualo riba: ${visualCap} kadr./s`,
   ];
-  perfStatsEl.textContent = [...perfLines, ...perfLocalStorageLines, FOOTER_CREDITS_LINE].join(
-    '\n',
-  );
+  const statLines = [...perfLines, ...perfLocalStorageLines].map((line) => escapeHtml(line));
+  const creditsLine = escapeHtml(FOOTER_CREDITS_LINE);
+  perfStatsEl.innerHTML = `${statLines.join('<br>')}<br>GitHub: <a href="${REPO_URL}" target="_blank" rel="noopener noreferrer">${REPO_URL}</a><br>${creditsLine}`;
 
   perfWindowStartMs = nowMs;
   perfFrameCount = 0;

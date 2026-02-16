@@ -1006,6 +1006,14 @@ h1 {
   font-family: 'IBM Plex Mono', 'SF Mono', Menlo, Consolas, monospace;
 }
 
+.perf-stats a {
+  color: inherit;
+  font: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  overflow-wrap: anywhere;
+}
+
 .build-number {
   margin: 0;
   text-align: left;
