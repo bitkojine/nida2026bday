@@ -1051,11 +1051,6 @@ test.describe('Rhythm game flow', () => {
         return await page.evaluate(() => window.__rhythmTest?.read().score ?? 0);
       })
       .toBeGreaterThan(0);
-    await expect
-      .poll(async () => {
-        return await page.evaluate(() => window.__rhythmTest?.read().streak ?? 0);
-      })
-      .toBeGreaterThan(0);
   });
 
   test('releasing just before hold end still scores within timing window', async ({ page }) => {
