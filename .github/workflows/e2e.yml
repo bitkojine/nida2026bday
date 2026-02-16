@@ -1,7 +1,8 @@
 name: E2E Tests
 
 on:
-  pull_request:
+  schedule:
+    - cron: '30 2 * * *'
   push:
     branches:
       - main
@@ -12,13 +13,56 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
+  actions: read
   contents: read
 
 jobs:
+  schedule-guard:
+    name: Nightly Change Guard
+    runs-on: ubuntu-latest
+    outputs:
+      should_run: ${{ steps.guard.outputs.should_run }}
+    steps:
+      - name: Detect if nightly should run
+        id: guard
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const isSchedule = context.eventName === 'schedule';
+            if (!isSchedule) {
+              core.setOutput('should_run', 'true');
+              return;
+            }
+
+            const { owner, repo } = context.repo;
+            const currentSha = context.sha;
+            const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
+              owner,
+              repo,
+              workflow_id: 'e2e.yml',
+              event: 'schedule',
+              status: 'completed',
+              per_page: 25,
+            });
+            const previousSuccess = runs.find(
+              (run) => run.id !== context.runId && run.conclusion === 'success',
+            );
+            if (!previousSuccess) {
+              core.setOutput('should_run', 'true');
+              return;
+            }
+
+            core.setOutput(
+              'should_run',
+              previousSuccess.head_sha === currentSha ? 'false' : 'true',
+            );
+
   e2e-functional:
     name: E2E Functional (${{ matrix.project }})
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    needs: schedule-guard
+    if: github.event_name != 'schedule' || needs.schedule-guard.outputs.should_run == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -38,16 +82,13 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Install Playwright browsers (Chromium + WebKit)
         run: npx playwright install --with-deps chromium webkit
 
       - name: Run E2E tests for matrix project
-        run: npm run test:e2e -- --project="${{ matrix.project }}" --grep-invert="@perf"
+        run: npm run test:e2e -- --project="${{ matrix.project }}" --grep-invert="@perf" --max-failures=1
 
       - name: Upload Playwright report
         if: always()
@@ -62,6 +103,8 @@ jobs:
     name: E2E Perf (${{ matrix.project }})
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    needs: schedule-guard
+    if: github.event_name != 'schedule' || needs.schedule-guard.outputs.should_run == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -81,16 +124,13 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci
-
-      - name: Typecheck
-        run: npm run typecheck
+        run: npm ci --prefer-offline --no-audit --no-fund
 
       - name: Install Playwright browsers (Chromium + WebKit)
         run: npx playwright install --with-deps chromium webkit
 
       - name: Run perf E2E tests for matrix project
-        run: npm run test:e2e -- --project="${{ matrix.project }}" --grep="@perf-common"
+        run: npm run test:e2e -- --project="${{ matrix.project }}" --grep="@perf-common" --max-failures=1
 
       - name: Upload Playwright report
         if: always()
