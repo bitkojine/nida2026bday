@@ -926,8 +926,12 @@ function renderAudioVisualizer(): void {
   const height = Math.max(1, Math.floor(audioVisualizerEl.height / (window.devicePixelRatio || 1)));
   const snapshot = audio.sampleVisualizer(52);
   const { bars } = snapshot;
-  const barWidth = Math.max(1, Math.floor((width - (bars.length - 1)) / bars.length));
   const gap = 1;
+  const horizontalInset = 2;
+  const innerWidth = Math.max(1, width - horizontalInset * 2);
+  const barWidth = Math.max(1, Math.floor((innerWidth - (bars.length - 1) * gap) / bars.length));
+  const contentWidth = bars.length * barWidth + (bars.length - 1) * gap;
+  const startX = horizontalInset + Math.max(0, Math.floor((innerWidth - contentWidth) / 2));
 
   audioVizCtx.clearRect(0, 0, width, height);
   audioVizCtx.fillStyle = 'rgba(255, 245, 226, 0.85)';
@@ -936,7 +940,7 @@ function renderAudioVisualizer(): void {
   const baseY = height - 4;
   const usableHeight = height - 10;
   for (let i = 0; i < bars.length; i += 1) {
-    const x = i * (barWidth + gap);
+    const x = startX + i * (barWidth + gap);
     const barHeight = Math.max(2, Math.floor(usableHeight * bars[i]));
     const hue = 28 + Math.round(bars[i] * 16);
     audioVizCtx.fillStyle = `hsl(${hue}deg 90% 45%)`;

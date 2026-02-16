@@ -7,9 +7,11 @@ Pirminis taikinys: iPhone Safari. Taip pat veikia desktop naršyklėse.
 
 - 4 juostų ritmo trasa su rodyklių valdymu (`← ↓ ↑ →`)
 - C# studija žaidimo taisyklėms keisti realiu laiku
+- Keičiamo aukščio C# redaktorius (apatinis dešinys kampas, tempimas aukštyn/žemyn)
 - Mokymosi misijos (`0/5` -> `5/5`) su nuolat išsaugomu šablonų atrakinimo atlygiu
 - Šokantis arklys (`canvas`) su spalvų, kepurių ir oro efektų valdymu per C#
 - Gyvi našumo rodikliai poraštėje (lietuviški: `kadr./s`, `ms`, atmintis, garso balsai, dalelės)
+- Garso vizualizatorius poraštėje (veikia ir kai garsas nutildytas)
 - Lietuviška UI ir dedikacija:
   - `Skirta Nidai – nuo Roberto. Su gimtadieniu! 🎉`
   - rodoma iškart po pagrindiniu pavadinimu
@@ -19,7 +21,7 @@ Pirminis taikinys: iPhone Safari. Taip pat veikia desktop naršyklėse.
 - TypeScript (`strict` įjungtas)
 - Vite
 - Vitest + Coverage (`@vitest/coverage-v8`)
-- Playwright (desktop + iPhone profilis)
+- Playwright (desktop + iPhone profiliai)
 - Monaco Editor
 - Canvas renderinimas
 - C# taisyklių vykdymas per `.NET WASM` bandymą su saugiu fallback parseriu
@@ -51,6 +53,7 @@ Atidaryk adresą iš terminalo (`vite` output), dažniausiai `http://127.0.0.1:5
 - Misijų kortelė visada rodoma virš C# redaktoriaus.
 - Įvykdžius visas 5 misijas, atrakini C# šablonų mygtukus.
 - Atrakinta būsena išsaugoma naršyklės `localStorage` rakte `nida2026bday:puzzlesUnlocked:v1`, todėl šablonai lieka atrakinti ir po puslapio perkrovimo.
+- Garso nutildymo būsena (`Garsas: ĮJUNGTAS/IŠJUNGTAS`) išsaugoma rakte `nida2026bday:soundMuted:v1`, todėl po perkrovimo išlieka paskutinis pasirinkimas.
 
 Jei matai klaidą po redagavimo:
 
@@ -76,7 +79,8 @@ npm run test:e2e
 
 E2E projektai:
 
-- `iphone` (`WebKit`, iPhone 14 profilis)
+- `iphone-12-pro-max` (`WebKit`, iPhone 12 Pro Max profilis)
+- `iphone-15-pro` (`WebKit`, iPhone 15 Pro profilis)
 - `desktop-chromium` (`Chromium`, Desktop Chrome profilis)
 
 ### Viskas (typecheck + unit + e2e)
@@ -121,7 +125,7 @@ Deploy modelis:
 - `localStorage` diagnostikoje rodoma:
   - ar saugykla prieinama,
   - bendras raktų kiekis,
-  - mūsų raktų (`nida2026bday:puzzlesUnlocked:v1`) būsena ir reikšmė,
+  - mūsų raktų (`nida2026bday:puzzlesUnlocked:v1`, `nida2026bday:soundMuted:v1`) būsena ir reikšmė,
   - apytikslis saugyklos užimtumas,
   - naršyklės `storage estimate` (`usage/quota`), jei API prieinama.
 
