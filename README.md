@@ -56,11 +56,16 @@ npm run preview
 - Vieningas oro fono renderis:
   - mažame arklio vaizde
   - dideliame puslapio fone
+- „Kodas nesikompiliuoja“ pranešimai:
+  - mažame arklio vaizde (su `?` išskleidimu ir vidiniu slinkimu ilgam tekstui)
+  - desktop kairiame puslapio stulpelyje
+  - abu pranešimai paslepiami, kai kodas vėl validus
 - `Pavojinga zona` poraštėje:
   - pilnas žaidimo reset (misijos, garsas, C# kodas ir susijusi būsena)
   - privalomas patvirtinimas su tekstu `yes reset`
   - po reset atliekamas programos perkrovimas
   - atskiras „tik C# kodo“ reset su patvirtinimu `reset code` (be progreso/garso atstatymo ir be perkrovimo)
+  - papildomas mygtukas visų misijų atrakinimui su paslėptu patvirtinimo kodu
 - Našumo ir saugyklos diagnostika poraštėje su stabilia „placeholder“ įkrovos būsena
 
 ## Kaip žaisti
@@ -94,6 +99,12 @@ Keičiami laukai/metodas:
 - `AkiuSpalva()`
 
 Pastaba: parseris palaiko ir enum reikšmes be tipo prefikso (pvz. `KARUNA`), bet rekomenduojamas pilnas variantas (pvz. `KepuresTipas.KARUNA`) dėl aiškumo.
+
+Kodo tikrinimas:
+
+- naudojamas `tree-sitter` C# WASM analizatorius + papildomos projekto taisyklės
+- jei WASM aplinka nepasiekiama, taikomas atsarginis struktūrinis tikrinimas
+- kai tikrinimas nepraeina, žaidimas pereina į techninės klaidos vizualinį režimą (miegantis arklys, techninis fonas)
 
 ## Šablonai
 
@@ -132,8 +143,10 @@ Legacy migracija:
   - naršyklės `storage estimate` jei prieinama
   - visų mūsų raktų reikšmės; C# kodo raktui rodoma tik eilučių skaičiaus santrauka
 - `Pavojinga zona` su dviem atstatymo režimais:
+- `Pavojinga zona` su trimis veiksmais:
   - pilnas žaidimo reset (`yes reset`) + puslapio perkrovimas
   - tik C# kodo reset (`reset code`)
+  - visų misijų atrakinimas (paslėptas patvirtinimo kodas)
 
 Įkrovos būsena:
 
@@ -173,9 +186,11 @@ Pagrindinės E2E aprėptys:
 - misijų progresas per visus etapus (`0..5`), perkrovimai ir regresijos
 - legacy rakto migracija į naują progreso sistemą
 - pilnas reset ir tik C# kodo reset (įskaitant patvirtinimo frazes)
+- misijų atrakinimo „cheat“ dialogas (tik su teisingu kodu)
 - redaktoriaus kodo išsaugojimas/perkrovimas ir klaidų atkūrimas
 - iPhone landscape/portrait ir desktop išdėstymo stabilumas
 - oro fono (mažo + didelio) renderio stabilumas ir ribiniai atvejai
+- compile-fail pranešimų elgsena (rodyti/slėpti, `?` išskleidimas)
 
 ## Skriptai
 
@@ -226,5 +241,6 @@ Deploy eiga:
 - Pridėta `Pavojinga zona` su pilnu reset, patvirtinimu (`yes reset`) ir puslapio perkrovimu
 - Pridėtas C# kodo išsaugojimas rakte `nida2026bday:editorSource:v1`
 - Pridėtas atskiras `reset code` srautas, kuris atstato tik C# kodą
+- Pridėtas visų misijų atrakinimo veiksmas su paslėptu patvirtinimo kodu
 - Suvienodintas mažo ir didelio oro fono renderinimas
 - Poraštės statistika atnaujinta su fiksuota placeholder įkrovos būsena

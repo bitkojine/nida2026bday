@@ -64,6 +64,21 @@ function requiredElement<T extends Element>(selector: string): T {
 app.innerHTML = `
   <canvas id="weatherSceneCanvas" aria-hidden="true"></canvas>
   <main class="layout">
+    <aside class="compile-notice-rail" id="compileNoticeRail" hidden>
+      <div class="compile-notice-card">
+        <p class="compile-notice-text" id="compileNoticeText">KODAS NESIKOMPILIUOJA</p>
+        <button
+          class="compile-notice-toggle"
+          id="compileNoticeToggle"
+          type="button"
+          aria-label="Rodyti daugiau informacijos"
+          aria-expanded="false"
+          title="Daugiau informacijos"
+        >
+          ?
+        </button>
+      </div>
+    </aside>
     <section class="game" id="gameScreen">
       <p class="hero-copy" id="heroCopy">
         <strong>🎁 Šokanti Arklio Ritmo Dovana</strong><br>
@@ -79,7 +94,22 @@ app.innerHTML = `
         <button class="mute-toggle" id="muteToggle" type="button">Garsas: ĮJUNGTAS</button>
       </header>
 
-      <canvas id="horseCanvas" aria-label="Šokantis arklys"></canvas>
+      <section class="horse-stage" aria-label="Arklio scena">
+        <canvas id="horseCanvas" aria-label="Šokantis arklys"></canvas>
+        <aside class="horse-compile-notice" id="horseCompileNotice" hidden>
+          <pre class="horse-compile-notice-text" id="horseCompileNoticeText">KODAS NESIKOMPILIUOJA</pre>
+          <button
+            class="horse-compile-notice-toggle"
+            id="horseCompileNoticeToggle"
+            type="button"
+            aria-label="Rodyti daugiau informacijos"
+            aria-expanded="false"
+            title="Daugiau informacijos"
+          >
+            ?
+          </button>
+        </aside>
+      </section>
 
       <section class="highway-shell" aria-label="Ritmo juostos">
         <div class="highway" id="laneHighway" aria-hidden="true"></div>
@@ -288,6 +318,12 @@ const editorPanelEl = requiredElement<HTMLElement>('#editorPanel');
 const editorResizerEl = requiredElement<HTMLButtonElement>('#editorResizer');
 const canvas = requiredElement<HTMLCanvasElement>('#horseCanvas');
 const weatherSceneCanvas = requiredElement<HTMLCanvasElement>('#weatherSceneCanvas');
+const compileNoticeRailEl = requiredElement<HTMLElement>('#compileNoticeRail');
+const compileNoticeTextEl = requiredElement<HTMLElement>('#compileNoticeText');
+const compileNoticeToggleEl = requiredElement<HTMLButtonElement>('#compileNoticeToggle');
+const horseCompileNoticeEl = requiredElement<HTMLElement>('#horseCompileNotice');
+const horseCompileNoticeTextEl = requiredElement<HTMLElement>('#horseCompileNoticeText');
+const horseCompileNoticeToggleEl = requiredElement<HTMLButtonElement>('#horseCompileNoticeToggle');
 const editorHost = requiredElement<HTMLDivElement>('#editor');
 
 const state = new GameStateManager();
@@ -333,6 +369,7 @@ const HORSE_VISUAL_FPS_COARSE = 34;
 const HORSE_VISUAL_FPS_FINE = 45;
 const LANE_VISUAL_FPS_COARSE = 34;
 const LANE_VISUAL_FPS_FINE = 36;
+const COMPILE_NOTICE_RAIL_MIN_WIDTH_PX = 1080;
 
 let rules: DanceRules = DEFAULT_RULES;
 let mood: HorseMood = 'GERAI';
@@ -602,26 +639,92 @@ function setCompileValidityState(isValid: boolean, result: CompileResult): void 
   if (!isValid && wasValid) {
     horseAnimator.clearNoteParticles();
   }
+  renderCompileNoticeRail();
+  renderHorseCompileNotice();
 }
 
 function buildTechnicalCompileNoticeLines(): string[] {
   const result = latestCompileResult;
+  const syntaxLine =
+    result?.syntaxEngine === 'tree-sitter-wasm'
+      ? 'Tree-sitter C# (WASM) sintaksės analizatorius aktyvus.'
+      : 'WASM sintaksės analizatorius nepasiekiamas; taikoma atsarginė C# struktūros patikra.';
   const modeLine =
     result?.mode === 'wasm'
-      ? '1) Sintakses tikrinimas: Tree-sitter C# (WASM).'
-      : '1) Sintakses tikrinimas: atsarginis C# tikrintuvas.';
-  const statusLine = result?.success
-    ? '4) Rezultatas: kodas sukompiliuotas.'
-    : '4) Rezultatas: kodas nesikompiliuoja.';
-  const errorLine = result?.errors[0] ? `5) Klaida: ${result.errors[0]}` : '5) Klaida: nenurodyta.';
+      ? 'Pilnas tikrinimo režimas (WASM komponentai pasiekiami).'
+      : 'Atsarginis tikrinimo režimas (dalis WASM komponentų nepasiekiama).';
+  const statusLine = result?.success ? 'Kodas sukompiliuotas.' : 'Kodas nesikompiliuoja.';
+  const errorLine = result?.errors[0] ?? 'Nenurodyta.';
   return [
     'KODAS NESIKOMPILIUOJA',
+    '',
+    '1) Sintaksės tikrinimas',
+    syntaxLine,
     modeLine,
-    '2) Strukturos patikra: DanceRules klase, skliaustai, enum nariai, AkiuSpalva().',
-    '3) Individualios taisykles: gerasLangas turi buti >= tobulasLangas.',
+    '',
+    '2) Struktūros patikra',
+    'DanceRules klasė, skliaustai, enum nariai, AkiuSpalva().',
+    '',
+    '3) Individualios taisyklės',
+    'gerasLangas turi būti >= tobulasLangas.',
+    '',
+    '4) Rezultatas',
     statusLine,
+    '',
+    '5) Klaida',
     errorLine,
   ];
+}
+
+function useDesktopCompileNoticeRail(): boolean {
+  const finePointer = window.matchMedia('(pointer: fine)').matches;
+  const hoverCapable = window.matchMedia('(hover: hover)').matches;
+  return finePointer && hoverCapable && window.innerWidth >= COMPILE_NOTICE_RAIL_MIN_WIDTH_PX;
+}
+
+function shouldRenderWeatherCanvasTechnicalNoticePanel(): boolean {
+  return !useDesktopCompileNoticeRail();
+}
+
+function renderCompileNoticeRail(): void {
+  if (compileIsValid) {
+    compileNoticeRailEl.hidden = true;
+    compileNoticeToggleEl.setAttribute('aria-expanded', 'false');
+    return;
+  }
+
+  const showRail = useDesktopCompileNoticeRail();
+  compileNoticeRailEl.hidden = !showRail;
+  compileNoticeToggleEl.setAttribute('aria-expanded', technicalNoticeExpanded ? 'true' : 'false');
+  if (!showRail) {
+    return;
+  }
+  const fullLines = buildTechnicalCompileNoticeLines();
+  const compactLines = [fullLines[0] ?? 'KODAS NESIKOMPILIUOJA', 'DAR REIKIA PADIRBETI'];
+  const linesToRender = technicalNoticeExpanded ? fullLines : compactLines;
+  compileNoticeTextEl.textContent = linesToRender.join('\n');
+}
+
+function renderHorseCompileNotice(): void {
+  if (compileIsValid) {
+    horseCompileNoticeEl.hidden = true;
+    horseCompileNoticeToggleEl.setAttribute('aria-expanded', 'false');
+    return;
+  }
+
+  const showNotice = true;
+  horseCompileNoticeEl.hidden = !showNotice;
+  horseCompileNoticeToggleEl.setAttribute(
+    'aria-expanded',
+    technicalNoticeExpanded ? 'true' : 'false',
+  );
+  if (!showNotice) {
+    return;
+  }
+  const fullLines = buildTechnicalCompileNoticeLines();
+  const compactLines = [fullLines[0] ?? 'KODAS NESIKOMPILIUOJA', 'DAR REIKIA PADIRBETI'];
+  const linesToRender = technicalNoticeExpanded ? fullLines : compactLines;
+  horseCompileNoticeTextEl.textContent = linesToRender.join('\n');
 }
 
 function isPointerInsideTechnicalIcon(
@@ -641,7 +744,8 @@ function isPointerInsideTechnicalIcon(
   const localY = clientY - rect.top;
   const dx = localX - iconHit.x;
   const dy = localY - iconHit.y;
-  return dx * dx + dy * dy <= iconHit.r * iconHit.r;
+  const tapRadius = iconHit.r + 6;
+  return dx * dx + dy * dy <= tapRadius * tapRadius;
 }
 
 function setRules(next: DanceRules): void {
@@ -1596,6 +1700,8 @@ function resizeCanvas(): void {
     latestVisualizerBars,
     compileIsValid ? [] : buildTechnicalCompileNoticeLines(),
   );
+  renderCompileNoticeRail();
+  renderHorseCompileNotice();
 
   fitHudValuesToBox();
   fitToggleButtonLabelsToBox();
@@ -1681,8 +1787,9 @@ function renderBackgroundWeatherScene(
     Math.floor(weatherSceneCanvas.height / Math.max(0.01, weatherSceneDpr)),
   );
   const sceneMode: WeatherSceneRenderMode = compileIsValid ? 'normal' : 'technical-test';
+  const showTechnicalNoticePanel = shouldRenderWeatherCanvasTechnicalNoticePanel();
   const iconHit: TechnicalNoticeIconHit | null =
-    sceneMode === 'technical-test' ? { x: 0, y: 0, r: 0 } : null;
+    sceneMode === 'technical-test' && showTechnicalNoticePanel ? { x: 0, y: 0, r: 0 } : null;
   renderWeatherScene(
     weatherSceneCtx,
     nowSec,
@@ -1694,6 +1801,7 @@ function renderBackgroundWeatherScene(
     technicalNoticeLines,
     technicalNoticeExpanded,
     iconHit,
+    showTechnicalNoticePanel,
   );
   weatherTechnicalNoticeIconHit = iconHit;
 }
@@ -1968,6 +2076,7 @@ function startLoop(): void {
           latestVisualizerBars,
           technicalNoticeLines,
           technicalNoticeExpanded,
+          false,
         );
       }
       if (shouldRenderAudioVisualizerFrame(timeMs)) {
@@ -2120,7 +2229,35 @@ function wireInputs(): void {
     event.preventDefault();
     event.stopPropagation();
     technicalNoticeExpanded = !technicalNoticeExpanded;
+    renderCompileNoticeRail();
+    renderHorseCompileNotice();
   };
+
+  compileNoticeToggleEl.addEventListener(
+    'click',
+    () => {
+      if (compileIsValid) {
+        return;
+      }
+      technicalNoticeExpanded = !technicalNoticeExpanded;
+      renderCompileNoticeRail();
+      renderHorseCompileNotice();
+    },
+    { signal },
+  );
+
+  horseCompileNoticeToggleEl.addEventListener(
+    'click',
+    () => {
+      if (compileIsValid) {
+        return;
+      }
+      technicalNoticeExpanded = !technicalNoticeExpanded;
+      renderCompileNoticeRail();
+      renderHorseCompileNotice();
+    },
+    { signal },
+  );
 
   canvas.addEventListener(
     'pointerdown',
@@ -2950,6 +3087,8 @@ async function bootstrapGame(): Promise<void> {
   renderSoundUiState();
   applyGlobalWeatherTheme(rules.oroEfektas);
   renderPuzzleProgress();
+  renderCompileNoticeRail();
+  renderHorseCompileNotice();
   fitHudValuesToBox();
   requestAnimationFrame(resizeCanvas);
   state.goTo('play');

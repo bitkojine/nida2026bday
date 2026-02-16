@@ -22,6 +22,9 @@
   --fs-large: 1rem;
   --panel-edge: rgba(136, 101, 58, 0.3);
   --panel-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.62), 0 1px 0 rgba(127, 92, 49, 0.12);
+  --layout-max-width: 580px;
+  --layout-gutter: 12px;
+  --compile-rail-width: 320px;
   color-scheme: light;
 }
 
@@ -29,11 +32,15 @@
   box-sizing: border-box;
 }
 
+[hidden] {
+  display: none !important;
+}
+
 html,
 body,
 #app {
   width: 100%;
-  min-height: 100%;
+  min-height: 100dvh;
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
 }
@@ -50,13 +57,15 @@ html {
 
 #app {
   position: relative;
+  isolation: isolate;
 }
 
+/* Top-level layer contract: fixed weather scene in back, UI layout above it. */
 #weatherSceneCanvas {
   position: fixed;
   inset: 0;
-  width: 100vw;
-  height: 100dvh;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   z-index: 0;
 }
@@ -338,8 +347,16 @@ body[data-weather='ZAIBAS']::after {
 }
 
 .layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, var(--layout-max-width)) minmax(0, 1fr);
+  align-items: start;
   min-height: 100dvh;
-  padding: env(safe-area-inset-top) 0 env(safe-area-inset-bottom);
+  width: 100%;
+  padding-top: max(var(--layout-gutter), env(safe-area-inset-top));
+  padding-right: max(var(--layout-gutter), env(safe-area-inset-right));
+  padding-bottom: max(var(--layout-gutter), env(safe-area-inset-bottom));
+  padding-left: max(var(--layout-gutter), env(safe-area-inset-left));
+  column-gap: var(--layout-gutter);
   position: relative;
   z-index: 1;
 }
@@ -353,13 +370,66 @@ body[data-weather='ZAIBAS']::after {
   flex-direction: column;
   gap: 12px;
   width: 100%;
-  max-width: 580px;
-  margin: 0 auto;
+  max-width: var(--layout-max-width);
+  margin: 0;
+  grid-column: 2;
+  justify-self: stretch;
   background: var(--card);
   border: 1px solid rgba(130, 93, 47, 0.18);
   border-radius: 0;
   padding: 14px;
   backdrop-filter: blur(8px);
+}
+
+.compile-notice-rail {
+  display: none;
+  grid-column: 1;
+  justify-self: end;
+  align-self: start;
+  width: min(var(--compile-rail-width), 100%);
+}
+
+.compile-notice-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(147, 208, 255, 0.62);
+  background: rgba(14, 29, 49, 0.9);
+  padding: 12px;
+  box-shadow:
+    inset 0 1px 0 rgba(191, 230, 255, 0.18),
+    0 4px 18px rgba(5, 10, 20, 0.22);
+}
+
+.compile-notice-text {
+  margin: 0;
+  white-space: pre-wrap;
+  color: #d8eeff;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.95rem;
+  line-height: 1.42;
+  font-weight: 700;
+  text-shadow: 0 1px 1px rgba(4, 9, 18, 0.7);
+}
+
+.compile-notice-toggle {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(177, 220, 255, 0.9);
+  background: rgba(30, 54, 82, 0.92);
+  color: #d9efff;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.05rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0;
+}
+
+.compile-notice-rail:not([hidden]) {
+  display: block;
 }
 
 .dedication {
@@ -530,6 +600,64 @@ h1 {
   box-shadow: inset 0 0 0 1px rgba(130, 93, 47, 0.25);
   background: linear-gradient(180deg, #87c8ff 0%, #e7f6ff 62%, #8fd380 100%);
   transform: translateZ(0);
+}
+
+.horse-stage {
+  position: relative;
+  width: 100%;
+}
+
+.horse-compile-notice {
+  position: absolute;
+  top: 10px;
+  bottom: 10px;
+  left: 10px;
+  right: 10px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: minmax(0, 1fr);
+  align-items: start;
+  gap: 10px;
+  border-radius: 10px;
+  border: 1px solid rgba(147, 208, 255, 0.62);
+  background: rgba(14, 29, 49, 0.9);
+  padding: 10px;
+  overflow: hidden;
+  box-shadow:
+    inset 0 1px 0 rgba(191, 230, 255, 0.18),
+    0 4px 18px rgba(5, 10, 20, 0.22);
+}
+
+.horse-compile-notice-text {
+  margin: 0;
+  min-height: 0;
+  height: 100%;
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  white-space: pre-wrap;
+  color: #d8eeff;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 0.83rem;
+  line-height: 1.38;
+  font-weight: 700;
+  text-shadow: 0 1px 1px rgba(4, 9, 18, 0.7);
+  padding-right: 3px;
+}
+
+.horse-compile-notice-toggle {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 1px solid rgba(177, 220, 255, 0.9);
+  background: rgba(30, 54, 82, 0.92);
+  color: #d9efff;
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 1.05rem;
+  font-weight: 800;
+  line-height: 1;
+  padding: 0;
 }
 
 .highway-shell {
@@ -1564,13 +1692,12 @@ h1 {
 }
 
 @media (min-width: 860px) {
-  .layout {
-    display: grid;
-    place-items: center;
-  }
-
   .game {
     padding: 18px;
+    min-height: calc(
+      100dvh - max(var(--layout-gutter), env(safe-area-inset-top)) -
+        max(var(--layout-gutter), env(safe-area-inset-bottom))
+    );
   }
 
   .fallback-lines,
@@ -1592,15 +1719,22 @@ h1 {
   }
 }
 
+@media (min-width: 1080px) and (pointer: fine) {
+  .layout {
+    --layout-gutter: 14px;
+    --compile-rail-width: 330px;
+  }
+}
+
 @media (orientation: landscape) and (pointer: coarse) {
   .layout {
-    padding-left: env(safe-area-inset-left);
-    padding-right: env(safe-area-inset-right);
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .game {
     --space-stack: 8px;
     max-width: none;
+    grid-column: 1;
     min-height: calc(100dvh - env(safe-area-inset-top) - env(safe-area-inset-bottom));
     border-radius: 0;
     border-left: 0;

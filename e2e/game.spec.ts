@@ -2106,22 +2106,27 @@ test.describe('Rhythm game flow', () => {
       })
       .toBe(false);
 
-    await expect
-      .poll(async () => {
-        return await page.evaluate(
-          () => window.__rhythmTest?.readTechnicalNoticeIcons().weather ?? null,
-        );
-      })
-      .toMatchObject({ x: expect.any(Number), y: expect.any(Number), r: expect.any(Number) });
+    const railToggle = page.locator('#compileNoticeToggle');
+    if (await railToggle.isVisible()) {
+      await railToggle.click();
+    } else {
+      await expect
+        .poll(async () => {
+          return await page.evaluate(
+            () => window.__rhythmTest?.readTechnicalNoticeIcons().weather ?? null,
+          );
+        })
+        .toMatchObject({ x: expect.any(Number), y: expect.any(Number), r: expect.any(Number) });
 
-    const weatherIconData = (await page.evaluate(
-      () => window.__rhythmTest?.readTechnicalNoticeIcons().weather ?? null,
-    )) as { x: number; y: number; r: number } | null;
-    expect(weatherIconData).not.toBeNull();
-    if (!weatherIconData) {
-      return;
+      const weatherIconData = (await page.evaluate(
+        () => window.__rhythmTest?.readTechnicalNoticeIcons().weather ?? null,
+      )) as { x: number; y: number; r: number } | null;
+      expect(weatherIconData).not.toBeNull();
+      if (!weatherIconData) {
+        return;
+      }
+      await dispatchTechnicalIconPointer('#weatherSceneCanvas', weatherIconData);
     }
-    await dispatchTechnicalIconPointer('#weatherSceneCanvas', weatherIconData);
 
     await expect
       .poll(async () => {
@@ -2129,28 +2134,50 @@ test.describe('Rhythm game flow', () => {
       })
       .toBe(true);
 
-    await expect
-      .poll(async () => {
-        return await page.evaluate(
+    if (await railToggle.isVisible()) {
+      await railToggle.click();
+    } else {
+      const horseNoticeToggle = page.locator('#horseCompileNoticeToggle');
+      if (await horseNoticeToggle.isVisible()) {
+        await horseNoticeToggle.click();
+      } else {
+        await expect
+          .poll(async () => {
+            return await page.evaluate(
+              () => window.__rhythmTest?.readTechnicalNoticeIcons().horse ?? null,
+            );
+          })
+          .toMatchObject({ x: expect.any(Number), y: expect.any(Number), r: expect.any(Number) });
+        const horseIconData = (await page.evaluate(
           () => window.__rhythmTest?.readTechnicalNoticeIcons().horse ?? null,
-        );
-      })
-      .toMatchObject({ x: expect.any(Number), y: expect.any(Number), r: expect.any(Number) });
-
-    const horseIconData = (await page.evaluate(
-      () => window.__rhythmTest?.readTechnicalNoticeIcons().horse ?? null,
-    )) as { x: number; y: number; r: number } | null;
-    expect(horseIconData).not.toBeNull();
-    if (!horseIconData) {
-      return;
+        )) as { x: number; y: number; r: number } | null;
+        expect(horseIconData).not.toBeNull();
+        if (!horseIconData) {
+          return;
+        }
+        await dispatchTechnicalIconPointer('#horseCanvas', horseIconData);
+      }
     }
-    await dispatchTechnicalIconPointer('#horseCanvas', horseIconData);
 
     await expect
       .poll(async () => {
         return await page.evaluate(() => window.__rhythmTest?.isTechnicalNoticeExpanded() ?? true);
       })
       .toBe(false);
+  });
+
+  test('compile notices are both hidden when code compiles', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? false);
+      })
+      .toBe(true);
+
+    await expect(page.locator('#compileNoticeRail')).toBeHidden();
+    await expect(page.locator('#horseCompileNotice')).toBeHidden();
   });
 
   test('many broken C# syntax cases always trigger compile-invalid technical mode', async ({

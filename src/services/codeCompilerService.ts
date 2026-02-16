@@ -385,6 +385,9 @@ export class CodeCompilerService {
   }
 
   compile(source: string): CompileResult {
+    const syntaxEngine: CompileResult['syntaxEngine'] = this.syntaxParser
+      ? 'tree-sitter-wasm'
+      : 'none';
     const syntaxError = this.validateSyntaxWithRealCompiler(source);
     if (syntaxError) {
       return {
@@ -392,6 +395,7 @@ export class CodeCompilerService {
         rules: this.lastValidRules,
         errors: [syntaxError],
         mode: this.runtimeMode,
+        syntaxEngine,
       };
     }
 
@@ -401,6 +405,7 @@ export class CodeCompilerService {
         rules: this.lastValidRules,
         errors: [translateCompilerError('identifier class DanceRules not found')],
         mode: this.runtimeMode,
+        syntaxEngine,
       };
     }
 
@@ -410,6 +415,7 @@ export class CodeCompilerService {
         rules: this.lastValidRules,
         errors: [translateCompilerError('brace mismatch expected }')],
         mode: this.runtimeMode,
+        syntaxEngine,
       };
     }
 
@@ -454,6 +460,7 @@ export class CodeCompilerService {
         rules: this.lastValidRules,
         errors: validationErrors,
         mode: this.runtimeMode,
+        syntaxEngine,
       };
     }
 
@@ -499,6 +506,7 @@ export class CodeCompilerService {
         rules: this.lastValidRules,
         errors: ['Geras langas negali būti mažesnis už tobulą langą.'],
         mode: this.runtimeMode,
+        syntaxEngine,
       };
     }
 
@@ -509,6 +517,7 @@ export class CodeCompilerService {
       rules: safe,
       errors: [],
       mode: this.runtimeMode,
+      syntaxEngine,
     };
   }
 }

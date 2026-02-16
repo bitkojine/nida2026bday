@@ -9,6 +9,7 @@ function okResult(rules: DanceRules = DEFAULT_RULES): CompileResult {
     rules,
     errors: [],
     mode: 'fallback',
+    syntaxEngine: 'none',
   };
 }
 
@@ -38,6 +39,7 @@ describe('compileFeedback', () => {
           rules: DEFAULT_RULES,
           errors: ['Blogas kodas'],
           mode: 'fallback',
+          syntaxEngine: 'none',
         }),
       ),
     };

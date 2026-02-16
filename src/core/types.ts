@@ -60,6 +60,7 @@ export interface CompileResult {
   rules: DanceRules;
   errors: string[];
   mode: 'wasm' | 'fallback';
+  syntaxEngine: 'tree-sitter-wasm' | 'none';
 }
 
 export const DEFAULT_RULES: DanceRules = {

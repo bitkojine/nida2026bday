@@ -8,6 +8,8 @@ export interface TechnicalNoticeIconHit {
   r: number;
 }
 
+const CENTER_LAYOUT_MAX_WIDTH_PX = 580;
+
 const HORSE_COLOR_PALETTE: Record<DanceRules['arklioSpalva'], string> = {
   SMELIO: '#d6b48a',
   TAMSIAI_RUDA: '#7d4f2d',
@@ -86,6 +88,26 @@ function wrapLineToWidth(ctx: CanvasRenderingContext2D, line: string, maxWidth: 
   return wrapped;
 }
 
+function fitLineWithEllipsis(
+  ctx: CanvasRenderingContext2D,
+  line: string,
+  maxWidth: number,
+): string {
+  if (ctx.measureText(line).width <= maxWidth) {
+    return line;
+  }
+  const ellipsis = '…';
+  let compact = line;
+  while (compact.length > 0) {
+    compact = compact.slice(0, -1).trimEnd();
+    const candidate = `${compact}${ellipsis}`;
+    if (ctx.measureText(candidate).width <= maxWidth) {
+      return candidate;
+    }
+  }
+  return ellipsis;
+}
+
 export function renderWeatherScene(
   ctx: CanvasRenderingContext2D,
   t: number,
@@ -97,6 +119,7 @@ export function renderWeatherScene(
   technicalNoticeLines?: readonly string[],
   technicalNoticeExpanded = false,
   technicalNoticeIconHit?: TechnicalNoticeIconHit | null,
+  showTechnicalNoticePanel = true,
 ): void {
   if (mode === 'technical-test') {
     const sky = ctx.createLinearGradient(0, 0, 0, h);
@@ -185,22 +208,40 @@ export function renderWeatherScene(
     }
     ctx.stroke();
 
+    if (!showTechnicalNoticePanel) {
+      if (technicalNoticeIconHit) {
+        technicalNoticeIconHit.x = 0;
+        technicalNoticeIconHit.y = 0;
+        technicalNoticeIconHit.r = 0;
+      }
+      return;
+    }
+
     const largeScene = w >= 900 && h >= 420;
     const outerMarginX = largeScene
       ? Math.max(14, Math.round(w * 0.02))
       : Math.max(4, Math.round(w * 0.02));
-    const outerMarginY = largeScene ? Math.max(14, Math.round(h * 0.06)) : 2;
+    const outerMarginY = largeScene
+      ? Math.max(14, Math.round(h * 0.06))
+      : Math.max(8, Math.round(h * 0.06));
     const panelPadding = largeScene
       ? Math.max(10, Math.round(w * 0.01))
       : Math.max(8, Math.round(w * 0.02));
     const panelX = outerMarginX;
     const panelY = outerMarginY;
     const panelAvailableWidth = Math.max(120, w - outerMarginX * 2);
+    const reservedCenterWidth = Math.min(
+      CENTER_LAYOUT_MAX_WIDTH_PX,
+      Math.max(0, w - outerMarginX * 2),
+    );
+    const leftColumnWidth = Math.max(0, Math.floor((w - reservedCenterWidth) * 0.5 - outerMarginX));
+    const panelMinWidth = largeScene && leftColumnWidth >= 210 ? 210 : 132;
     const panelMaxWidth = largeScene
-      ? Math.min(panelAvailableWidth, Math.round(w * 0.46))
+      ? Math.min(panelAvailableWidth, Math.max(panelMinWidth, leftColumnWidth))
       : Math.min(panelAvailableWidth, Math.round(w * 0.9));
-    const panelMaxHeight = largeScene ? Math.round(h * 0.62) : Math.max(80, h - outerMarginY * 2);
-    const panelMinWidth = largeScene ? 210 : 132;
+    const panelMaxHeight = largeScene
+      ? Math.max(120, h - outerMarginY * 2)
+      : Math.max(80, h - outerMarginY * 2);
     const defaultNoticeLines = [
       'KODAS NESIKOMPILIUOJA',
       '1) Tikrinimas: Tree-sitter C# (WASM).',
@@ -218,23 +259,24 @@ export function renderWeatherScene(
     ];
     const noticeSourceLines = technicalNoticeExpanded ? fullNoticeLines : compactNoticeLines;
     const preferredTextSize = largeScene
-      ? Math.max(20, Math.round(h * 0.05))
+      ? Math.max(15, Math.min(19, Math.round(panelMaxWidth / 14)))
       : Math.max(14, Math.round(h * 0.11));
     const minTextSize = largeScene ? 12 : 10;
 
     let primaryTextSize = preferredTextSize;
-    let lineGap = Math.max(2, Math.round(primaryTextSize * 0.2));
+    let lineGap = Math.max(3, Math.round(primaryTextSize * 0.32));
     let wrappedLines: string[] = [];
     let panelWidth = Math.max(panelMinWidth, panelMaxWidth);
     let panelHeight = 0;
     let iconRadius = 0;
     let iconSlotWidth = 0;
+    let maxTextWidth = 72;
 
     const recalcPanelGeometry = (): void => {
       ctx.font = `800 ${primaryTextSize}px "Space Grotesk", sans-serif`;
       iconRadius = Math.max(10, Math.round(primaryTextSize * 0.55));
       iconSlotWidth = iconRadius * 2 + Math.max(8, Math.round(panelPadding * 0.75));
-      const maxTextWidth = Math.max(72, panelWidth - panelPadding * 2 - iconSlotWidth);
+      maxTextWidth = Math.max(72, panelWidth - panelPadding * 2 - iconSlotWidth);
       wrappedLines = [];
       for (const sourceLine of noticeSourceLines) {
         const lines = wrapLineToWidth(ctx, sourceLine, maxTextWidth);
@@ -259,8 +301,25 @@ export function renderWeatherScene(
     recalcPanelGeometry();
     while (panelHeight > panelMaxHeight && primaryTextSize > minTextSize) {
       primaryTextSize -= 1;
-      lineGap = Math.max(2, Math.round(primaryTextSize * 0.2));
+      lineGap = Math.max(3, Math.round(primaryTextSize * 0.32));
       recalcPanelGeometry();
+    }
+
+    if (panelHeight > panelMaxHeight && wrappedLines.length > 0) {
+      const perLineHeight = primaryTextSize + lineGap;
+      const usableHeight = Math.max(1, panelMaxHeight - panelPadding * 2 + lineGap);
+      const maxVisibleLines = Math.max(1, Math.floor(usableHeight / Math.max(1, perLineHeight)));
+      if (wrappedLines.length > maxVisibleLines) {
+        wrappedLines = wrappedLines.slice(0, maxVisibleLines);
+        const lastIndex = wrappedLines.length - 1;
+        wrappedLines[lastIndex] = fitLineWithEllipsis(ctx, wrappedLines[lastIndex], maxTextWidth);
+      }
+      const contentHeight = Math.ceil(
+        panelPadding * 2 +
+          wrappedLines.length * primaryTextSize +
+          Math.max(0, wrappedLines.length - 1) * lineGap,
+      );
+      panelHeight = Math.min(panelMaxHeight, contentHeight);
     }
 
     ctx.textAlign = 'left';
@@ -771,6 +830,7 @@ export class HorseAnimator {
     technicalWaveformBars?: readonly number[],
     technicalNoticeLines?: readonly string[],
     technicalNoticeExpanded = false,
+    showTechnicalNoticePanel = true,
   ): void {
     const { canvas } = this.ctx;
     const scaleX = Math.max(1, this.ctx.getTransform().a || 1);
@@ -799,7 +859,7 @@ export class HorseAnimator {
     this.ctx.clip();
     this.ctx.clearRect(0, 0, w, h);
     const technicalNoticeIconHit: TechnicalNoticeIconHit | null =
-      sceneMode === 'technical-test' ? { x: 0, y: 0, r: 0 } : null;
+      sceneMode === 'technical-test' && showTechnicalNoticePanel ? { x: 0, y: 0, r: 0 } : null;
     renderWeatherScene(
       this.ctx,
       t,
@@ -811,6 +871,7 @@ export class HorseAnimator {
       technicalNoticeLines,
       technicalNoticeExpanded,
       technicalNoticeIconHit,
+      showTechnicalNoticePanel,
     );
     this.lastTechnicalNoticeIconHit = technicalNoticeIconHit;
 
