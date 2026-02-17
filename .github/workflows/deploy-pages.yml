@@ -5,6 +5,9 @@ on:
     branches: [main]
   workflow_dispatch:
 
+env:
+  VITE_REAL_COMPILER_API_URL: https://nida2026bday-real-compiler.onrender.com
+
 permissions:
   contents: read
   pages: write

@@ -9,6 +9,9 @@ on:
     - cron: '0 2 * * *'
   workflow_dispatch:
 
+env:
+  VITE_REAL_COMPILER_API_URL: https://nida2026bday-real-compiler.onrender.com
+
 permissions:
   actions: read
   contents: read
