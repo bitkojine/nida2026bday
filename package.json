@@ -21,6 +21,7 @@
     "check:bundle-size": "tsx ./scripts/check-bundle-size.mts",
     "check:dist-integrity": "tsx ./scripts/check-dist-integrity.mts",
     "check:localstorage-keys": "tsx ./scripts/check-localstorage-keys.mts",
+    "check:real-compiler-backend": "tsx ./scripts/check-real-compiler-backend.mts",
     "check:mission-template-contract": "tsx ./scripts/check-mission-template-contract.mts",
     "check:no-todo-fixme": "tsx ./scripts/check-no-todo-fixme.mts",
     "check:readme-links": "tsx ./scripts/check-readme-links.mts",

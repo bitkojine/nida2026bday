@@ -86,6 +86,9 @@ jobs:
       - name: 30s quality bundle
         run: npm run check:30s
 
+      - name: Real compiler backend integration
+        run: npm run check:real-compiler-backend
+
   nightly-quality:
     name: Nightly Quality (unit + build)
     runs-on: ubuntu-latest
@@ -111,6 +114,9 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Real compiler backend integration
+        run: npm run check:real-compiler-backend
 
       - name: Upload coverage artifact
         if: always()

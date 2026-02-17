@@ -248,6 +248,18 @@ Greitas kasdienis vartai (apie 30 s):
 npm run check:30s
 ```
 
+Backend integracijos patikra (Render Roslyn API):
+
+```bash
+npm run check:real-compiler-backend
+```
+
+Ši patikra tikrina:
+
+- `/health` atsaką
+- valid C# kompiliavimo atvejį
+- invalid C# atmetimo atvejį su klaidomis
+
 ## Skriptai
 
 ```bash
