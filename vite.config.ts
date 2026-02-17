@@ -199,8 +199,17 @@ function getBuildGitRepoStats(): BuildGitRepoStats {
   }
 }
 
+function resolveBasePath(): string {
+  const raw = process.env.VITE_APP_BASE_PATH?.trim();
+  if (!raw) {
+    return '/nida2026bday/';
+  }
+  const withLeadingSlash = raw.startsWith('/') ? raw : `/${raw}`;
+  return withLeadingSlash.endsWith('/') ? withLeadingSlash : `${withLeadingSlash}/`;
+}
+
 export default defineConfig({
-  base: '/nida2026bday/',
+  base: resolveBasePath(),
   define: {
     __BUILD_VILNIUS_TIME__: JSON.stringify(getVilniusBuildStamp()),
     __GIT_REPO_STATS__: JSON.stringify(getBuildGitRepoStats()),
