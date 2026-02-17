@@ -2306,6 +2306,40 @@ test.describe('Rhythm game flow', () => {
       .toBe(false);
   });
 
+  test('real compiler button uses default backend endpoint when env is missing', async ({
+    page,
+  }) => {
+    const payloads: string[] = [];
+    await page.route(
+      'https://nida2026bday-real-compiler.onrender.com/api/csharp/compile',
+      async (route) => {
+        payloads.push(route.request().postData() ?? '');
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            valid: true,
+            diagnostics: [],
+            compiler: 'Roslyn C#',
+          }),
+        });
+      },
+    );
+
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+
+    await page.locator('#realCompilerCheckButton').click();
+    await expect(page.locator('#realCompilerStatus')).toContainText(
+      'Tikras C# kompiliatorius (Roslyn C#): kodas kompiliuojasi.',
+    );
+    await expect(page.locator('#realCompilerStatus')).toContainText('Klaidų nerasta.');
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]).toContain('"source"');
+    expect(payloads[0]).toContain('public class DanceRules');
+  });
+
   test('compile notices are both hidden when code compiles', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();

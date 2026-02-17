@@ -10,17 +10,31 @@ describe('realCompilerService', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns unavailable when API url is not configured', async () => {
+  it('uses default API URL when env var is not configured', async () => {
     vi.unstubAllEnvs();
+    globalThis.fetch = vi.fn(async () => {
+      return new Response(
+        JSON.stringify({
+          valid: true,
+          diagnostics: [],
+          compiler: 'Roslyn C#',
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as unknown as typeof fetch;
+
     const result = await checkWithRealCompiler('public class DanceRules {}');
-    expect(result).toMatchObject({ kind: 'unavailable' });
-    expect(result.details).toEqual(
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      'https://nida2026bday-real-compiler.onrender.com/api/csharp/compile',
       expect.objectContaining({
-        endpoint: '',
-        requestMethod: 'POST',
-        responseStatus: null,
+        method: 'POST',
       }),
     );
+    expect(result).toMatchObject({
+      kind: 'ok',
+      valid: true,
+      compiler: 'Roslyn C#',
+    });
   });
 
   it('calls API and returns successful compiler response', async () => {

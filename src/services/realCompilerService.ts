@@ -45,9 +45,15 @@ interface RealCompilerApiPayload {
   compiler?: unknown;
 }
 
+const DEFAULT_REAL_COMPILER_API_URL = 'https://nida2026bday-real-compiler.onrender.com';
+
 function readRealCompilerApiUrl(): string {
   const value = import.meta.env.VITE_REAL_COMPILER_API_URL;
-  return typeof value === 'string' ? value.trim() : '';
+  const configured = typeof value === 'string' ? value.trim() : '';
+  if (configured.length > 0) {
+    return configured;
+  }
+  return DEFAULT_REAL_COMPILER_API_URL;
 }
 
 function parseDiagnostics(value: unknown): string[] {
@@ -83,7 +89,7 @@ export async function checkWithRealCompiler(
   if (!apiUrl) {
     return {
       kind: 'unavailable',
-      reason: 'nenurodytas VITE_REAL_COMPILER_API_URL adresas.',
+      reason: 'nėra kompiliatoriaus API adreso.',
       details: {
         ...baseDetails,
         endpoint: '',
