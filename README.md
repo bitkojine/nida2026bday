@@ -15,6 +15,7 @@ Mobile-first ritmo žaidimas su gyvu C# taisyklių redagavimu naršyklėje.
 - [Šablonai](#šablonai)
 - [Išsaugojimas localStorage](#išsaugojimas-localstorage)
 - [Poraštė ir diagnostika](#poraštė-ir-diagnostika)
+- [Atminties nutekėjimų prevencijos architektūra](#atminties-nutekėjimų-prevencijos-architektūra)
 - [30 sekundžių patikros biudžetas](#30-sekundžių-patikros-biudžetas)
 - [Testavimas](#testavimas)
 - [Skriptai](#skriptai)
@@ -139,6 +140,12 @@ Naudojami raktai:
 
 - garso vizualizatorius
 - našumo statistika (`kadr./s`, kadro laikas, atmintis, natos, dalelės, garso balsai)
+- resursų gyvavimo ciklo statistika:
+  - aktyvūs/pikiniai klausytojai
+  - aktyvūs/pikiniai timeout/interval/RAF
+  - aktyvūs/pikiniai `AbortController`
+  - aktyvūs/pikiniai `ResizeObserver`
+  - aktyvūs/pikiniai C# sintaksės medžiai
 - vietinės saugyklos diagnostika:
   - raktų kiekis
   - mūsų raktų būsena
@@ -155,6 +162,48 @@ Naudojami raktai:
 - statistika turi fiksuotą eilučių struktūrą nuo pirmo renderio
 - kol duomenys ruošiami, rodomi aiškūs `tikrinama...` placeholder elementai
 - dėl to turinys „nešokinėja“ tarp eilučių skaičiaus
+
+## Atminties nutekėjimų prevencijos architektūra
+
+Šis projektas taiko „resource ownership“ modelį, kad sumažintų app lygio atminties nutekėjimus:
+
+- vienas centralizuotas resursų skaitiklis (`src/core/resourceTracker.ts`)
+- vienas async resursų wrapper sluoksnis (`src/core/trackedAsync.ts`)
+- vienas sintaksės medžių valdymo taškas (`src/services/syntaxTreeResource.ts`)
+- vienas event binding sluoksnis (`src/ui/lifecycleBindings.ts`)
+
+Praktinės taisyklės:
+
+- nenaudoti tiesiogiai `addEventListener/removeEventListener` feature kode
+- nenaudoti tiesiogiai `setTimeout/setInterval/requestAnimationFrame` ir jų `clear/cancel` API
+- nenaudoti tiesiogiai `new AbortController()`
+- nenaudoti tiesiogiai parser `parse(...)` medžių be `withParsedSyntaxTree(...)`
+
+Vietoje to naudoti wrapperius:
+
+- `bindTrackedEventListener(...)` ir esamus `bind*` helperius
+- `setTrackedTimeout(...)`, `clearTrackedTimeout(...)`
+- `setTrackedInterval(...)`, `clearTrackedInterval(...)`
+- `requestTrackedAnimationFrame(...)`, `cancelTrackedAnimationFrame(...)`
+- `createTrackedAbortController()`
+- `withParsedSyntaxTree(...)`
+
+Kodėl šis dizainas geras:
+
+- aiški nuosavybė: kiekvienas resursas turi apibrėžtą sukūrimo ir sunaikinimo vietą
+- matomumas: aktyvūs ir pikiniai resursai rodomi poraštėje runtime metu
+- priverstinė disciplina: CI check blokuoja naujus tiesioginius API naudojimus
+- mažesnė regresijų rizika: leak klasė gaudoma architektūriškai, ne vien lokaliais pataisymais
+
+Tradeoff (ką paaukojame):
+
+- daugiau boilerplate: daugiau helperių ir scope/disposer kodų
+- mažesnis „greitas rašymas“: paprasti event/timer scenarijai tampa ilgesni
+- daugiau priežiūros: ownership check taisyklės gali reikalauti atnaujinimų keičiant architektūrą
+- dalinė migracija silpnina garantijas: jei naujas kelias apeina wrapperius, rizika sugrįžta
+- skaitikliai matuoja app resursų gyvavimo tvarką, bet ne absoliučią naršyklės atmintį
+
+Rezultatas: sąmoningai keičiame patogumą į patikimumą. Šiame projekte tai laikoma teisingu kompromisu.
 
 ## 30 sekundžių patikros biudžetas
 
@@ -176,6 +225,7 @@ Kas įeina į `check:30s`:
 - `npm run format:check` - užtikrina vienodą formatą ir sumažina triukšmą diff'uose
 - `npm run typecheck` - pagauna tipų kontraktų lūžius prieš runtime
 - `npm run test:fast` - greitas unit scenarijų tinklas kritinei logikai
+- `npm run check:resource-ownership` - draudžia tiesioginius `tree-sitter` `.parse(...)`, `addEventListener/removeEventListener` ir timer/RAF/`AbortController` API naudojimus už wrapper failų ribų
 - `npm run check:localstorage-keys` - saugo localStorage raktų kontraktą nuo netyčinių lūžių
 - `npm run check:mission-template-contract` - tikrina misijų ir šablonų suderinamumą
 - `npm run build` - garantuoja, kad tikrinamas naujausias produkcinis build iš dabartinio kodo
@@ -187,10 +237,11 @@ Kas įeina į `check:30s`:
 2. `npm run format:check`
 3. `npm run typecheck`
 4. `npm run test:fast`
-5. `npm run check:localstorage-keys`
-6. `npm run check:mission-template-contract`
-7. `npm run build`
-8. `npm run check:smoke-mobile`
+5. `npm run check:resource-ownership`
+6. `npm run check:localstorage-keys`
+7. `npm run check:mission-template-contract`
+8. `npm run build`
+9. `npm run check:smoke-mobile`
 
 Dabartinis biudžeto panaudojimas:
 

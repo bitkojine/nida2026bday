@@ -24,11 +24,12 @@
     "check:real-compiler-backend": "tsx ./scripts/check-real-compiler-backend.mts",
     "check:mission-template-contract": "tsx ./scripts/check-mission-template-contract.mts",
     "check:no-todo-fixme": "tsx ./scripts/check-no-todo-fixme.mts",
+    "check:resource-ownership": "tsx ./scripts/check-resource-ownership.mts",
     "check:readme-links": "tsx ./scripts/check-readme-links.mts",
     "check:tracked-file-sizes": "tsx ./scripts/check-tracked-file-sizes.mts",
     "check:source-hygiene": "tsx ./scripts/check-source-hygiene.mts",
     "check:repo-hygiene": "tsx ./scripts/check-repo-hygiene.mts",
-    "check:30s": "npm run lint && npm run format:check && npm run typecheck && npm run test:fast && npm run check:localstorage-keys && npm run check:mission-template-contract && npm run build && npm run check:smoke-mobile"
+    "check:30s": "npm run lint && npm run format:check && npm run typecheck && npm run test:fast && npm run check:resource-ownership && npm run check:localstorage-keys && npm run check:mission-template-contract && npm run build && npm run check:smoke-mobile"
   },
   "dependencies": {
     "@monaco-editor/loader": "^1.7.0",

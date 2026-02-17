@@ -1,6 +1,7 @@
 import { translateCompilerError } from '../core/errorTranslator';
 import { Language, Parser, type Node as SyntaxNode } from 'web-tree-sitter';
 import csharpGrammarWasmUrl from 'tree-sitter-c-sharp/tree-sitter-c_sharp.wasm?url';
+import { withParsedSyntaxTree } from './syntaxTreeResource';
 import {
   DEFAULT_RULES,
   HORSE_COLOR_NAMES,
@@ -291,23 +292,25 @@ export class CodeCompilerService {
       return null;
     }
 
-    const tree = this.syntaxParser.parse(source);
-    if (!tree) {
+    const syntaxResult = withParsedSyntaxTree(this.syntaxParser, source, (tree) => {
+      const root = tree.rootNode;
+      if (!root.hasError) {
+        return null;
+      }
+
+      const firstError = this.findFirstSyntaxErrorNode(root);
+      if (!firstError) {
+        return 'C# kompiliatorius aptiko sintaksės klaidą.';
+      }
+
+      const line = firstError.startPosition.row + 1;
+      const column = firstError.startPosition.column + 1;
+      return `C# kompiliatorius aptiko sintaksės klaidą (${line}:${column}).`;
+    });
+    if (!syntaxResult.parsed) {
       return 'C# kompiliatorius aptiko sintaksės klaidą.';
     }
-    const root = tree.rootNode;
-    if (!root.hasError) {
-      return null;
-    }
-
-    const firstError = this.findFirstSyntaxErrorNode(root);
-    if (!firstError) {
-      return 'C# kompiliatorius aptiko sintaksės klaidą.';
-    }
-
-    const line = firstError.startPosition.row + 1;
-    const column = firstError.startPosition.column + 1;
-    return `C# kompiliatorius aptiko sintaksės klaidą (${line}:${column}).`;
+    return syntaxResult.value;
   }
 
   async init(): Promise<void> {

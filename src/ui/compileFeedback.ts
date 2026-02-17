@@ -1,4 +1,6 @@
 import type { CompileResult, DanceRules } from '../core/types';
+import { createTrackedAbortController } from '../core/trackedAsync';
+import { bindTrackedEventListener } from './lifecycleBindings';
 
 type MaybePromise<T> = T | Promise<T>;
 
@@ -36,15 +38,16 @@ export function wireFallbackCompiler(
   initialCode: string,
   compiler: CompileServiceLike,
   sinks: CompileFeedbackSinks,
-): void {
+): () => void {
   textarea.value = initialCode;
 
   const runCompile = (): void => {
     applyCompileResult(textarea.value, compiler, sinks);
   };
 
-  textarea.addEventListener('input', runCompile);
+  const cleanup = bindTrackedEventListener(textarea, 'input', runCompile);
   runCompile();
+  return cleanup;
 }
 
 export function createLatestCompileApplier(
@@ -67,7 +70,7 @@ export function createLatestCompileApplier(
     async apply(source: string): Promise<CompileResult | null> {
       const token = ++latestToken;
       activeController?.abort();
-      const controller = new AbortController();
+      const controller = createTrackedAbortController();
       activeController = controller;
 
       let result: CompileResult;

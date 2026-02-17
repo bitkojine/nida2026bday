@@ -14,8 +14,18 @@ import { computeNoteYPercent } from './core/noteLayout';
 import type { HitEvaluation } from './core/rhythmEngine';
 import { RhythmEngine } from './core/rhythmEngine';
 import { createRuntimeScope } from './core/runtimeScope';
+import { readResourceStatsSnapshot } from './core/resourceTracker';
 import { planSongPlaybackBatch } from './core/songPlaybackPlanner';
 import { DEFAULT_SONG_MAP } from './core/songMap';
+import {
+  cancelTrackedAnimationFrame,
+  clearTrackedInterval,
+  clearTrackedTimeout,
+  createTrackedAbortController,
+  requestTrackedAnimationFrame,
+  setTrackedInterval,
+  setTrackedTimeout,
+} from './core/trackedAsync';
 import {
   DEFAULT_RULES,
   type CompileResult,
@@ -43,6 +53,7 @@ import { highlightCSharp } from './ui/fallbackSyntaxHighlighter';
 import {
   bindAudioBootstrapBindings,
   bindElementClick,
+  bindTrackedEventListener,
   bindSimpleEditorResizeBindings,
   bindWindowLifecycle,
   bindWindowResize,
@@ -626,7 +637,7 @@ function stabilizeEditorPanelAutoSize(fallback: HTMLTextAreaElement, remainingFr
     return;
   }
 
-  window.requestAnimationFrame(() => {
+  requestTrackedAnimationFrame(window, () => {
     stabilizeEditorPanelAutoSize(fallback, remainingFrames - 1);
   });
 }
@@ -994,7 +1005,7 @@ function renderPuzzleProgress(): void {
 function wireAudioBootstrap(): void {
   audioBootstrapScope.disposeAll();
   if (audioRetryIntervalId !== null) {
-    window.clearInterval(audioRetryIntervalId);
+    clearTrackedInterval(window, audioRetryIntervalId);
     audioRetryIntervalId = null;
   }
 
@@ -1007,20 +1018,22 @@ function wireAudioBootstrap(): void {
 
   // Retry while autoplay is active; if browser policy allows, audio starts
   // without waiting for explicit gameplay input.
-  audioRetryIntervalId = window.setInterval(() => {
-    if (!autoplayEnabled) {
-      return;
-    }
-    if (audio.isUnlocked()) {
-      return;
-    }
-    tryUnlock();
-  }, 900);
+  audioRetryIntervalId = setTrackedInterval(
+    window,
+    () => {
+      if (!autoplayEnabled) {
+        return;
+      }
+      if (audio.isUnlocked()) {
+        return;
+      }
+      tryUnlock();
+    },
+    900,
+  );
   audioBootstrapScope.add(() => {
-    if (audioRetryIntervalId !== null) {
-      window.clearInterval(audioRetryIntervalId);
-      audioRetryIntervalId = null;
-    }
+    clearTrackedInterval(window, audioRetryIntervalId);
+    audioRetryIntervalId = null;
   });
 
   // Policy-safe recovery hooks for browsers that require any user gesture.
@@ -1047,12 +1060,12 @@ function teardownGame(): void {
   disposed = true;
 
   if (compileTimer !== null) {
-    window.clearTimeout(compileTimer);
+    clearTrackedTimeout(window, compileTimer);
     compileTimer = null;
   }
 
   if (audioRetryIntervalId !== null) {
-    window.clearInterval(audioRetryIntervalId);
+    clearTrackedInterval(window, audioRetryIntervalId);
     audioRetryIntervalId = null;
   }
   audioBootstrapScope.disposeAll();
@@ -1067,7 +1080,7 @@ function teardownGame(): void {
   realCompilerScope.disposeAll();
 
   if (loopRafId !== null) {
-    window.cancelAnimationFrame(loopRafId);
+    cancelTrackedAnimationFrame(window, loopRafId);
     loopRafId = null;
   }
 
@@ -1125,14 +1138,16 @@ function mountSimpleEditor(): void {
     highlight.innerHTML = highlightCSharp(overlaySource);
   };
 
-  wireFallbackCompiler(fallback, INITIAL_EDITOR_SOURCE, compiler, {
-    setRules: (next) => {
-      setRules(next);
-    },
-    setCompileValidity: (isValid, result) => {
-      setCompileValidityState(isValid, result);
-    },
-  });
+  editorScope.add(
+    wireFallbackCompiler(fallback, INITIAL_EDITOR_SOURCE, compiler, {
+      setRules: (next) => {
+        setRules(next);
+      },
+      setCompileValidity: (isValid, result) => {
+        setCompileValidityState(isValid, result);
+      },
+    }),
+  );
 
   readEditorSource = (): string => fallback.value;
   writeEditorSource = (next: string): void => {
@@ -1152,42 +1167,48 @@ function mountSimpleEditor(): void {
   syncHighlight();
   tryAutoSizeEditorPanelForInitialLoad();
   growEditorPanelToFitFallbackContent(fallback);
-  window.requestAnimationFrame(() => {
+  requestTrackedAnimationFrame(window, () => {
     stabilizeEditorPanelAutoSize(fallback);
   });
   syncLines();
   syncHighlight();
-  const fallbackEventsAbort = new AbortController();
+  const fallbackEventsAbort = createTrackedAbortController();
   const { signal } = fallbackEventsAbort;
-  fallback.addEventListener(
-    'input',
-    () => {
-      persistEditorSource(fallback.value);
-      growEditorPanelToFitFallbackContent(fallback);
-      syncLines();
-      syncHighlight();
-    },
-    { signal },
+  editorScope.add(
+    bindTrackedEventListener(
+      fallback,
+      'input',
+      () => {
+        persistEditorSource(fallback.value);
+        growEditorPanelToFitFallbackContent(fallback);
+        syncLines();
+        syncHighlight();
+      },
+      { signal },
+    ),
   );
-  fallback.addEventListener(
-    'scroll',
-    () => {
-      if (scrollSyncRafId !== null) {
-        return;
-      }
-      scrollSyncRafId = window.requestAnimationFrame(() => {
-        scrollSyncRafId = null;
-        syncOverlayScroll();
-      });
-    },
-    { passive: true, signal },
+  editorScope.add(
+    bindTrackedEventListener(
+      fallback,
+      'scroll',
+      () => {
+        if (scrollSyncRafId !== null) {
+          return;
+        }
+        scrollSyncRafId = requestTrackedAnimationFrame(window, () => {
+          scrollSyncRafId = null;
+          syncOverlayScroll();
+        });
+      },
+      { passive: true, signal },
+    ),
   );
   editorScope.add(() => {
     fallbackEventsAbort.abort();
   });
   editorScope.add(() => {
     if (scrollSyncRafId !== null) {
-      window.cancelAnimationFrame(scrollSyncRafId);
+      cancelTrackedAnimationFrame(window, scrollSyncRafId);
       scrollSyncRafId = null;
     }
   });
@@ -1231,7 +1252,7 @@ function wireRealCompilerCheck(): void {
 
   const runCheck = async (): Promise<void> => {
     activeController?.abort();
-    const controller = new AbortController();
+    const controller = createTrackedAbortController();
     activeController = controller;
     realCompilerCheckButtonEl.disabled = true;
     const checkingText = 'Tikras C# kompiliatorius tikrina kodą...';
@@ -1644,6 +1665,7 @@ function renderPerformanceStatsPanel(
   activeHoldVoicesText: string,
   visualCapText: string,
 ): void {
+  const resourceStats = readResourceStatsSnapshot();
   const perfLines = [
     `Našumas: ${fpsText}`,
     `Kadro laikas: ${frameTimeText}`,
@@ -1663,6 +1685,14 @@ function renderPerformanceStatsPanel(
     }),
     `Užimta (apytiksliai): ${perfLocalStorageStats.approxUsed}`,
     `Naršyklės saugykla: ${perfLocalStorageStats.browserStorage}`,
+    'Resursų sekimas:',
+    `Aktyvūs įvykio klausytojai: ${resourceStats.activeEventListeners} (pikas: ${resourceStats.peakEventListeners})`,
+    `Aktyvūs timeout: ${resourceStats.activeTimeouts} (pikas: ${resourceStats.peakTimeouts})`,
+    `Aktyvūs interval: ${resourceStats.activeIntervals} (pikas: ${resourceStats.peakIntervals})`,
+    `Aktyvūs requestAnimationFrame: ${resourceStats.activeRafs} (pikas: ${resourceStats.peakRafs})`,
+    `Aktyvūs AbortController: ${resourceStats.activeAbortControllers} (pikas: ${resourceStats.peakAbortControllers})`,
+    `Aktyvūs ResizeObserver: ${resourceStats.activeResizeObservers} (pikas: ${resourceStats.peakResizeObservers})`,
+    `Aktyvūs sintaksės medžiai: ${resourceStats.activeSyntaxTrees} (pikas: ${resourceStats.peakSyntaxTrees})`,
     'Git diagnostika:',
     ...buildGitDiagnosticsLines(),
   ];
@@ -1859,9 +1889,13 @@ function showJudgementFeedback(
     judgementPopEl.classList.add('praleista');
   }
   judgementPopEl.classList.add('show');
-  window.setTimeout(() => {
-    judgementPopEl.classList.remove('show');
-  }, 180);
+  setTrackedTimeout(
+    window,
+    () => {
+      judgementPopEl.classList.remove('show');
+    },
+    180,
+  );
 
   if (lane !== null) {
     const laneButton = document.querySelector<HTMLButtonElement>(
@@ -1869,7 +1903,7 @@ function showJudgementFeedback(
     );
     if (laneButton) {
       laneButton.classList.add('hit');
-      window.setTimeout(() => laneButton.classList.remove('hit'), 120);
+      setTrackedTimeout(window, () => laneButton.classList.remove('hit'), 120);
     }
   }
 }
@@ -1925,7 +1959,7 @@ function resizeCanvas(): void {
 
 function stabilizeCanvasSizing(remainingFrames = 8): void {
   if (canvasStabilizeRafId !== null) {
-    window.cancelAnimationFrame(canvasStabilizeRafId);
+    cancelTrackedAnimationFrame(window, canvasStabilizeRafId);
     canvasStabilizeRafId = null;
   }
 
@@ -1934,7 +1968,7 @@ function stabilizeCanvasSizing(remainingFrames = 8): void {
     return;
   }
 
-  canvasStabilizeRafId = window.requestAnimationFrame(() => {
+  canvasStabilizeRafId = requestTrackedAnimationFrame(window, () => {
     stabilizeCanvasSizing(remainingFrames - 1);
   });
 }
@@ -2034,7 +2068,7 @@ function wireCanvasResize(): void {
   }
   canvasScope.add(() => {
     if (canvasStabilizeRafId !== null) {
-      window.cancelAnimationFrame(canvasStabilizeRafId);
+      cancelTrackedAnimationFrame(window, canvasStabilizeRafId);
       canvasStabilizeRafId = null;
     }
   });
@@ -2299,10 +2333,10 @@ function startLoop(): void {
       }
       updatePerformanceStats(timeMs);
     }
-    loopRafId = requestAnimationFrame(tick);
+    loopRafId = requestTrackedAnimationFrame(window, tick);
   };
 
-  loopRafId = requestAnimationFrame(tick);
+  loopRafId = requestTrackedAnimationFrame(window, tick);
 }
 
 async function initEditor(): Promise<void> {
@@ -2310,22 +2344,19 @@ async function initEditor(): Promise<void> {
     if (!codeStudioEl.open) {
       return;
     }
-    window.requestAnimationFrame(() => {
+    requestTrackedAnimationFrame(window, () => {
       tryAutoSizeEditorPanelForInitialLoad();
       const fallback = document.querySelector<HTMLTextAreaElement>('#fallbackCode');
       if (fallback) {
         growEditorPanelToFitFallbackContent(fallback);
-        window.requestAnimationFrame(() => {
+        requestTrackedAnimationFrame(window, () => {
           stabilizeEditorPanelAutoSize(fallback);
         });
       }
       window.dispatchEvent(new Event('resize'));
     });
   };
-  codeStudioEl.addEventListener('toggle', onCodeStudioToggle);
-  editorScope.add(() => {
-    codeStudioEl.removeEventListener('toggle', onCodeStudioToggle);
-  });
+  editorScope.add(bindTrackedEventListener(codeStudioEl, 'toggle', onCodeStudioToggle));
 
   if (shouldUseSimpleEditor()) {
     mountSimpleEditor();
@@ -2351,10 +2382,8 @@ async function initEditor(): Promise<void> {
 
     editor.onDidChangeModelContent(() => {
       persistEditorSource(editor.getValue());
-      if (compileTimer !== null) {
-        window.clearTimeout(compileTimer);
-      }
-      compileTimer = window.setTimeout(runCompile, 150);
+      clearTrackedTimeout(window, compileTimer);
+      compileTimer = setTrackedTimeout(window, runCompile, 150);
     });
 
     readEditorSource = (): string => editor.getValue();
@@ -2362,9 +2391,7 @@ async function initEditor(): Promise<void> {
       const normalized = ensureTrailingEmptyLine(next);
       editor.setValue(normalized);
       persistEditorSource(normalized);
-      if (compileTimer !== null) {
-        window.clearTimeout(compileTimer);
-      }
+      clearTrackedTimeout(window, compileTimer);
       runCompile();
     };
 
@@ -2380,7 +2407,7 @@ async function initEditor(): Promise<void> {
 
 function wireInputs(): void {
   inputScope.disposeAll();
-  const abortController = new AbortController();
+  const abortController = createTrackedAbortController();
   const { signal } = abortController;
 
   const isTypingTarget = (target: EventTarget | null): boolean => {
@@ -2409,7 +2436,7 @@ function wireInputs(): void {
     }
 
     laneButton.classList.add('hit');
-    window.setTimeout(() => laneButton.classList.remove('hit'), 120);
+    setTrackedTimeout(window, () => laneButton.classList.remove('hit'), 120);
   };
 
   const vibrateTap = (): void => {
@@ -2450,181 +2477,220 @@ function wireInputs(): void {
     renderHorseCompileNotice();
   };
 
-  compileNoticeToggleEl.addEventListener(
-    'click',
-    () => {
-      if (compileIsValid) {
-        return;
-      }
-      technicalNoticeExpanded = !technicalNoticeExpanded;
-      renderCompileNoticeRail();
-      renderHorseCompileNotice();
-    },
-    { signal },
+  inputScope.add(
+    bindTrackedEventListener(
+      compileNoticeToggleEl,
+      'click',
+      () => {
+        if (compileIsValid) {
+          return;
+        }
+        technicalNoticeExpanded = !technicalNoticeExpanded;
+        renderCompileNoticeRail();
+        renderHorseCompileNotice();
+      },
+      { signal },
+    ),
   );
 
-  horseCompileNoticeToggleEl.addEventListener(
-    'click',
-    () => {
-      if (compileIsValid) {
-        return;
-      }
-      technicalNoticeExpanded = !technicalNoticeExpanded;
-      renderCompileNoticeRail();
-      renderHorseCompileNotice();
-    },
-    { signal },
+  inputScope.add(
+    bindTrackedEventListener(
+      horseCompileNoticeToggleEl,
+      'click',
+      () => {
+        if (compileIsValid) {
+          return;
+        }
+        technicalNoticeExpanded = !technicalNoticeExpanded;
+        renderCompileNoticeRail();
+        renderHorseCompileNotice();
+      },
+      { signal },
+    ),
   );
 
-  canvas.addEventListener(
-    'pointerdown',
-    (event) => {
-      toggleTechnicalNoticeOnCanvasPointer(
-        canvas,
-        horseAnimator.getTechnicalNoticeIconHit(),
-        event,
-      );
-    },
-    { signal },
+  inputScope.add(
+    bindTrackedEventListener(
+      canvas,
+      'pointerdown',
+      (event) => {
+        toggleTechnicalNoticeOnCanvasPointer(
+          canvas,
+          horseAnimator.getTechnicalNoticeIconHit(),
+          event as PointerEvent,
+        );
+      },
+      { signal },
+    ),
   );
 
-  weatherSceneCanvas.addEventListener(
-    'pointerdown',
-    (event) => {
-      toggleTechnicalNoticeOnCanvasPointer(
-        weatherSceneCanvas,
-        weatherTechnicalNoticeIconHit,
-        event,
-      );
-    },
-    { signal },
+  inputScope.add(
+    bindTrackedEventListener(
+      weatherSceneCanvas,
+      'pointerdown',
+      (event) => {
+        toggleTechnicalNoticeOnCanvasPointer(
+          weatherSceneCanvas,
+          weatherTechnicalNoticeIconHit,
+          event as PointerEvent,
+        );
+      },
+      { signal },
+    ),
   );
 
   document.querySelectorAll<HTMLButtonElement>('.input-row button').forEach((button) => {
     const lane = Number(button.dataset.lane);
-    button.addEventListener(
-      'touchstart',
+    inputScope.add(
+      bindTrackedEventListener(
+        button,
+        'touchstart',
+        (event) => {
+          event.preventDefault();
+          audio.unlock();
+          if (pressedLanes.has(lane)) {
+            return;
+          }
+          pressedLanes.add(lane);
+          pulseLaneButton(lane);
+          vibrateTap();
+          startLanePress(performance.now() / 1000, lane);
+        },
+        { passive: false, signal },
+      ),
+    );
+
+    inputScope.add(
+      bindTrackedEventListener(
+        button,
+        'touchend',
+        () => {
+          releasePointerLane(lane);
+        },
+        { signal },
+      ),
+    );
+
+    inputScope.add(
+      bindTrackedEventListener(
+        button,
+        'touchcancel',
+        () => {
+          releasePointerLane(lane);
+        },
+        { signal },
+      ),
+    );
+
+    inputScope.add(
+      bindTrackedEventListener(
+        button,
+        'mousedown',
+        () => {
+          audio.unlock();
+          if (pressedLanes.has(lane)) {
+            return;
+          }
+          pressedLanes.add(lane);
+          pulseLaneButton(lane);
+          startLanePress(performance.now() / 1000, lane);
+        },
+        { signal },
+      ),
+    );
+
+    inputScope.add(
+      bindTrackedEventListener(
+        button,
+        'mouseup',
+        () => {
+          releasePointerLane(lane);
+        },
+        { signal },
+      ),
+    );
+
+    inputScope.add(
+      bindTrackedEventListener(
+        button,
+        'mouseleave',
+        () => {
+          releasePointerLane(lane);
+        },
+        { signal },
+      ),
+    );
+  });
+
+  inputScope.add(
+    bindTrackedEventListener(
+      window,
+      'mouseup',
+      () => {
+        const now = performance.now() / 1000;
+        for (const lane of Array.from(pressedLanes)) {
+          if (keyHeldLanes.has(lane)) {
+            continue;
+          }
+          pressedLanes.delete(lane);
+          releaseLanePress(now, lane);
+        }
+      },
+      { signal },
+    ),
+  );
+
+  inputScope.add(
+    bindTrackedEventListener(
+      window,
+      'keydown',
       (event) => {
+        if (isTypingTarget(event.target)) {
+          return;
+        }
+
+        const lane = normalizeLaneFromKey((event as KeyboardEvent).key);
+        if (lane === null) {
+          return;
+        }
+
         event.preventDefault();
         audio.unlock();
         if (pressedLanes.has(lane)) {
           return;
         }
+        keyHeldLanes.add(lane);
         pressedLanes.add(lane);
         pulseLaneButton(lane);
-        vibrateTap();
         startLanePress(performance.now() / 1000, lane);
       },
-      { passive: false, signal },
-    );
-
-    button.addEventListener(
-      'touchend',
-      () => {
-        releasePointerLane(lane);
-      },
       { signal },
-    );
+    ),
+  );
 
-    button.addEventListener(
-      'touchcancel',
-      () => {
-        releasePointerLane(lane);
-      },
-      { signal },
-    );
-
-    button.addEventListener(
-      'mousedown',
-      () => {
-        audio.unlock();
-        if (pressedLanes.has(lane)) {
+  inputScope.add(
+    bindTrackedEventListener(
+      window,
+      'keyup',
+      (event) => {
+        if (isTypingTarget(event.target)) {
           return;
         }
-        pressedLanes.add(lane);
-        pulseLaneButton(lane);
-        startLanePress(performance.now() / 1000, lane);
-      },
-      { signal },
-    );
 
-    button.addEventListener(
-      'mouseup',
-      () => {
-        releasePointerLane(lane);
-      },
-      { signal },
-    );
+        const lane = normalizeLaneFromKey((event as KeyboardEvent).key);
+        if (lane === null) {
+          return;
+        }
 
-    button.addEventListener(
-      'mouseleave',
-      () => {
-        releasePointerLane(lane);
-      },
-      { signal },
-    );
-  });
-
-  window.addEventListener(
-    'mouseup',
-    () => {
-      const now = performance.now() / 1000;
-      for (const lane of Array.from(pressedLanes)) {
-        if (keyHeldLanes.has(lane)) {
-          continue;
+        keyHeldLanes.delete(lane);
+        if (!pressedLanes.has(lane)) {
+          return;
         }
         pressedLanes.delete(lane);
-        releaseLanePress(now, lane);
-      }
-    },
-    { signal },
-  );
-
-  window.addEventListener(
-    'keydown',
-    (event) => {
-      if (isTypingTarget(event.target)) {
-        return;
-      }
-
-      const lane = normalizeLaneFromKey(event.key);
-      if (lane === null) {
-        return;
-      }
-
-      event.preventDefault();
-      audio.unlock();
-      if (pressedLanes.has(lane)) {
-        return;
-      }
-      keyHeldLanes.add(lane);
-      pressedLanes.add(lane);
-      pulseLaneButton(lane);
-      startLanePress(performance.now() / 1000, lane);
-    },
-    { signal },
-  );
-
-  window.addEventListener(
-    'keyup',
-    (event) => {
-      if (isTypingTarget(event.target)) {
-        return;
-      }
-
-      const lane = normalizeLaneFromKey(event.key);
-      if (lane === null) {
-        return;
-      }
-
-      keyHeldLanes.delete(lane);
-      if (!pressedLanes.has(lane)) {
-        return;
-      }
-      pressedLanes.delete(lane);
-      releaseLanePress(performance.now() / 1000, lane);
-    },
-    { signal },
+        releaseLanePress(performance.now() / 1000, lane);
+      },
+      { signal },
+    ),
   );
 
   inputScope.add(() => {
@@ -2879,20 +2945,28 @@ function wireDangerZone(): void {
     }
   };
 
-  unlockAllMissionsConfirmInputEl.addEventListener('input', onUnlockMissionsInputChange);
-  unlockAllMissionsDialogEl.addEventListener('keydown', onUnlockMissionsKeyDown);
-  resetProgressConfirmInputEl.addEventListener('input', onProgressInputChange);
-  resetProgressDialogEl.addEventListener('keydown', onProgressKeyDown);
-  resetCodeConfirmInputEl.addEventListener('input', onCodeInputChange);
-  resetCodeDialogEl.addEventListener('keydown', onCodeKeyDown);
-  dangerZoneScope.add(() => {
-    unlockAllMissionsConfirmInputEl.removeEventListener('input', onUnlockMissionsInputChange);
-    unlockAllMissionsDialogEl.removeEventListener('keydown', onUnlockMissionsKeyDown);
-    resetProgressConfirmInputEl.removeEventListener('input', onProgressInputChange);
-    resetProgressDialogEl.removeEventListener('keydown', onProgressKeyDown);
-    resetCodeConfirmInputEl.removeEventListener('input', onCodeInputChange);
-    resetCodeDialogEl.removeEventListener('keydown', onCodeKeyDown);
-  });
+  dangerZoneScope.add(
+    bindTrackedEventListener(unlockAllMissionsConfirmInputEl, 'input', onUnlockMissionsInputChange),
+  );
+  dangerZoneScope.add(
+    bindTrackedEventListener(
+      unlockAllMissionsDialogEl,
+      'keydown',
+      onUnlockMissionsKeyDown as EventListener,
+    ),
+  );
+  dangerZoneScope.add(
+    bindTrackedEventListener(resetProgressConfirmInputEl, 'input', onProgressInputChange),
+  );
+  dangerZoneScope.add(
+    bindTrackedEventListener(resetProgressDialogEl, 'keydown', onProgressKeyDown as EventListener),
+  );
+  dangerZoneScope.add(
+    bindTrackedEventListener(resetCodeConfirmInputEl, 'input', onCodeInputChange),
+  );
+  dangerZoneScope.add(
+    bindTrackedEventListener(resetCodeDialogEl, 'keydown', onCodeKeyDown as EventListener),
+  );
 }
 
 function wireWindowLifecycleBindings(): void {
@@ -2910,7 +2984,7 @@ function wireWindowLifecycleBindings(): void {
 
 function wireEditorResizeHandle(): void {
   editorResizeScope.disposeAll();
-  const abortController = new AbortController();
+  const abortController = createTrackedAbortController();
   const { signal } = abortController;
   let dragging = false;
   let startY = 0;
@@ -2942,81 +3016,104 @@ function wireEditorResizeHandle(): void {
     document.body.classList.remove('dragging-editor-resize');
   };
 
-  editorResizerEl.addEventListener(
-    'pointerdown',
-    (event) => {
-      if (event.button !== 0 && event.pointerType !== 'touch') {
-        return;
-      }
-      event.preventDefault();
-      dragging = true;
-      startY = event.clientY;
-      startHeight = editorPanelEl.getBoundingClientRect().height;
-      document.body.classList.add('dragging-editor-resize');
-      editorResizerEl.setPointerCapture(event.pointerId);
-    },
-    { signal },
+  editorResizeScope.add(
+    bindTrackedEventListener(
+      editorResizerEl,
+      'pointerdown',
+      (event) => {
+        const pointerEvent = event as PointerEvent;
+        if (pointerEvent.button !== 0 && pointerEvent.pointerType !== 'touch') {
+          return;
+        }
+        pointerEvent.preventDefault();
+        dragging = true;
+        startY = pointerEvent.clientY;
+        startHeight = editorPanelEl.getBoundingClientRect().height;
+        document.body.classList.add('dragging-editor-resize');
+        editorResizerEl.setPointerCapture(pointerEvent.pointerId);
+      },
+      { signal },
+    ),
   );
-  editorResizerEl.addEventListener(
-    'mousedown',
-    (event) => {
-      if (event.button !== 0) {
-        return;
-      }
-      event.preventDefault();
-      dragging = true;
-      startY = event.clientY;
-      startHeight = editorPanelEl.getBoundingClientRect().height;
-      document.body.classList.add('dragging-editor-resize');
-    },
-    { signal },
+  editorResizeScope.add(
+    bindTrackedEventListener(
+      editorResizerEl,
+      'mousedown',
+      (event) => {
+        const mouseEvent = event as MouseEvent;
+        if (mouseEvent.button !== 0) {
+          return;
+        }
+        mouseEvent.preventDefault();
+        dragging = true;
+        startY = mouseEvent.clientY;
+        startHeight = editorPanelEl.getBoundingClientRect().height;
+        document.body.classList.add('dragging-editor-resize');
+      },
+      { signal },
+    ),
   );
-  editorResizerEl.addEventListener(
-    'touchstart',
-    (event) => {
-      const touch = event.touches[0];
-      if (!touch) {
-        return;
-      }
-      event.preventDefault();
-      dragging = true;
-      startY = touch.clientY;
-      startHeight = editorPanelEl.getBoundingClientRect().height;
-      document.body.classList.add('dragging-editor-resize');
-    },
-    { passive: false, signal },
+  editorResizeScope.add(
+    bindTrackedEventListener(
+      editorResizerEl,
+      'touchstart',
+      (event) => {
+        const touchEvent = event as TouchEvent;
+        const touch = touchEvent.touches[0];
+        if (!touch) {
+          return;
+        }
+        touchEvent.preventDefault();
+        dragging = true;
+        startY = touch.clientY;
+        startHeight = editorPanelEl.getBoundingClientRect().height;
+        document.body.classList.add('dragging-editor-resize');
+      },
+      { passive: false, signal },
+    ),
   );
-  window.addEventListener('pointermove', onPointerMove, { passive: false, signal });
-  window.addEventListener(
-    'mousemove',
-    (event) => {
-      if (!dragging) {
-        return;
-      }
-      onMoveY(event.clientY);
-    },
-    { signal },
+  editorResizeScope.add(
+    bindTrackedEventListener(window, 'pointermove', onPointerMove as EventListener, {
+      passive: false,
+      signal,
+    }),
   );
-  window.addEventListener(
-    'touchmove',
-    (event) => {
-      if (!dragging) {
-        return;
-      }
-      const touch = event.touches[0];
-      if (!touch) {
-        return;
-      }
-      event.preventDefault();
-      onMoveY(touch.clientY);
-    },
-    { passive: false, signal },
+  editorResizeScope.add(
+    bindTrackedEventListener(
+      window,
+      'mousemove',
+      (event) => {
+        if (!dragging) {
+          return;
+        }
+        onMoveY((event as MouseEvent).clientY);
+      },
+      { signal },
+    ),
   );
-  window.addEventListener('pointerup', onPointerUp, { signal });
-  window.addEventListener('pointercancel', onPointerUp, { signal });
-  window.addEventListener('mouseup', onPointerUp, { signal });
-  window.addEventListener('touchend', onPointerUp, { signal });
-  window.addEventListener('touchcancel', onPointerUp, { signal });
+  editorResizeScope.add(
+    bindTrackedEventListener(
+      window,
+      'touchmove',
+      (event) => {
+        if (!dragging) {
+          return;
+        }
+        const touch = (event as TouchEvent).touches[0];
+        if (!touch) {
+          return;
+        }
+        event.preventDefault();
+        onMoveY(touch.clientY);
+      },
+      { passive: false, signal },
+    ),
+  );
+  editorResizeScope.add(bindTrackedEventListener(window, 'pointerup', onPointerUp, { signal }));
+  editorResizeScope.add(bindTrackedEventListener(window, 'pointercancel', onPointerUp, { signal }));
+  editorResizeScope.add(bindTrackedEventListener(window, 'mouseup', onPointerUp, { signal }));
+  editorResizeScope.add(bindTrackedEventListener(window, 'touchend', onPointerUp, { signal }));
+  editorResizeScope.add(bindTrackedEventListener(window, 'touchcancel', onPointerUp, { signal }));
 
   editorResizeScope.add(() => {
     abortController.abort();
@@ -3319,7 +3416,9 @@ async function bootstrapGame(): Promise<void> {
   renderCompileNoticeRail();
   renderHorseCompileNotice();
   fitHudValuesToBox();
-  requestAnimationFrame(resizeCanvas);
+  requestTrackedAnimationFrame(window, () => {
+    resizeCanvas();
+  });
   state.goTo('play');
   state.resetRun();
   startLoop();

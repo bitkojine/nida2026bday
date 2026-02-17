@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { CodeCompilerService } from '../src/services/codeCompilerService';
 import { CSHARP_TEMPLATE } from '../src/services/csharpTemplate';
 
@@ -179,5 +179,58 @@ describe('CodeCompilerService', () => {
     const result = service.compile(edited);
     expect(result.success).toBe(false);
     expect(result.errors.join(' ')).toContain('OroEfektas');
+  });
+
+  it('releases parser tree for syntax-valid source', () => {
+    const service = new CodeCompilerService();
+    const deleteSpy = vi.fn();
+    const rootNode = {
+      hasError: false,
+      isError: false,
+      isMissing: false,
+      childCount: 0,
+      child: () => null,
+    };
+    const parseSpy = vi.fn(() => ({ rootNode, delete: deleteSpy }));
+    (service as unknown as { syntaxParser: { parse: (source: string) => unknown } }).syntaxParser =
+      {
+        parse: parseSpy,
+      };
+
+    const result = service.compile(CSHARP_TEMPLATE);
+    expect(result.success).toBe(true);
+    expect(parseSpy).toHaveBeenCalledTimes(1);
+    expect(deleteSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('releases parser tree for syntax-error source', () => {
+    const service = new CodeCompilerService();
+    const deleteSpy = vi.fn();
+    const errorNode = {
+      hasError: true,
+      isError: true,
+      isMissing: false,
+      startPosition: { row: 1, column: 2 },
+      childCount: 0,
+      child: () => null,
+    };
+    const rootNode = {
+      hasError: true,
+      isError: false,
+      isMissing: false,
+      childCount: 1,
+      child: () => errorNode,
+    };
+    const parseSpy = vi.fn(() => ({ rootNode, delete: deleteSpy }));
+    (service as unknown as { syntaxParser: { parse: (source: string) => unknown } }).syntaxParser =
+      {
+        parse: parseSpy,
+      };
+
+    const result = service.compile(CSHARP_TEMPLATE);
+    expect(result.success).toBe(false);
+    expect(result.errors[0]).toContain('sintaksės klaidą');
+    expect(parseSpy).toHaveBeenCalledTimes(1);
+    expect(deleteSpy).toHaveBeenCalledTimes(1);
   });
 });
