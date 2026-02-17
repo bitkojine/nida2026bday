@@ -123,17 +123,23 @@ app.innerHTML = `
     </aside>
     <section class="game" id="gameScreen">
       <p class="hero-copy" id="heroCopy">
-        <strong>🎁 Šokanti Arklio Ritmo Dovana</strong><br>
-        ${DEDICATION_TEXT}<br>
-        Versija: ${__BUILD_VILNIUS_TIME__} (Lietuvos laikas)
+        <strong class="hero-line hero-line-title">🎁 Šokanti Arklio Ritmo Dovana</strong>
+        <span class="hero-line hero-line-subtitle">${DEDICATION_TEXT}</span>
+        <span class="hero-line hero-line-version">Versija: ${__BUILD_VILNIUS_TIME__} (Lietuvos laikas)</span>
       </p>
       <header class="hud">
         <div><strong>Taškai</strong><span id="score">0</span></div>
         <div><strong>Serija</strong><span id="streak">0</span></div>
         <div><strong>Daugiklis</strong><span id="multiplier">x1</span></div>
         <div><strong>Vertinimas</strong><span id="judgement">PRALEISTA</span></div>
-        <button class="autoplay-toggle" id="autoplayToggle" type="button">Žaisti automatiškai: TAIP</button>
-        <button class="mute-toggle" id="muteToggle" type="button">Garsas: ĮJUNGTAS</button>
+        <button class="autoplay-toggle" id="autoplayToggle" type="button">
+          <span class="toggle-label">Žaisti automatiškai:</span>
+          <span class="toggle-state on">TAIP</span>
+        </button>
+        <button class="mute-toggle" id="muteToggle" type="button">
+          <span class="toggle-label">Garsas:</span>
+          <span class="toggle-state on">ĮJUNGTAS</span>
+        </button>
       </header>
 
       <section class="horse-stage" aria-label="Arklio scena">
@@ -938,6 +944,15 @@ function buildTechnicalCompileNoticeLines(): string[] {
 }
 
 function useDesktopCompileNoticeRail(): boolean {
+  const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
+  const anyCoarsePointer = window.matchMedia('(any-pointer: coarse)').matches;
+  const touchPoints = navigator.maxTouchPoints ?? 0;
+  const likelyMobileUa = /Android|webOS|iPhone|iPad|iPod|IEMobile|Opera Mini|Mobile/i.test(
+    navigator.userAgent,
+  );
+  if (coarsePointer || anyCoarsePointer || touchPoints > 0 || likelyMobileUa) {
+    return false;
+  }
   const finePointer = window.matchMedia('(pointer: fine)').matches;
   const hoverCapable = window.matchMedia('(hover: hover)').matches;
   return finePointer && hoverCapable && window.innerWidth >= COMPILE_NOTICE_RAIL_MIN_WIDTH_PX;
@@ -1923,14 +1938,14 @@ renderPerformanceStatsPanel(
 );
 
 function renderAutoplayUiState(): void {
-  autoplayToggleEl.innerHTML = `<span class="toggle-label">Žaisti automatiškai:</span> <span class="toggle-state ${autoplayEnabled ? 'on' : 'off'}">${autoplayEnabled ? 'TAIP' : 'NE'}</span>`;
+  autoplayToggleEl.innerHTML = `<span class="toggle-label">Žaisti automatiškai:</span><span class="toggle-state ${autoplayEnabled ? 'on' : 'off'}">${autoplayEnabled ? 'TAIP' : 'NE'}</span>`;
   autoplayOverlayEl.classList.toggle('show', autoplayEnabled);
   fitToggleButtonLabelsToBox();
 }
 
 function renderSoundUiState(): void {
   const soundOn = !soundMuted;
-  muteToggleEl.innerHTML = `<span class="toggle-label">Garsas:</span> <span class="toggle-state ${soundOn ? 'on' : 'off'}">${soundOn ? 'ĮJUNGTAS' : 'IŠJUNGTAS'}</span>`;
+  muteToggleEl.innerHTML = `<span class="toggle-label">Garsas:</span><span class="toggle-state ${soundOn ? 'on' : 'off'}">${soundOn ? 'ĮJUNGTAS' : 'IŠJUNGTAS'}</span>`;
   fitToggleButtonLabelsToBox();
 }
 

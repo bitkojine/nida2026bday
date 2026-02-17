@@ -550,13 +550,47 @@ h1 {
 }
 
 .hero-copy {
-  margin: 0;
+  margin: 0 auto;
   text-align: center;
   font-family: 'Space Grotesk', sans-serif;
   font-size: clamp(1rem, 2.1vw, 1.2rem);
-  line-height: 1.32;
+  line-height: 1.4;
   letter-spacing: 0.01em;
   color: #3f2b19;
+  max-width: min(100%, 38ch);
+  text-wrap: balance;
+}
+
+.hero-line {
+  display: block;
+}
+
+.hero-line-title {
+  margin-bottom: 2px;
+}
+
+.hero-line-subtitle {
+  margin-bottom: 2px;
+}
+
+.hero-line-version {
+  margin-top: 2px;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 480px) {
+  .hero-copy {
+    line-height: 1.45;
+    max-width: 31ch;
+  }
+
+  .hero-line-title {
+    margin-bottom: 3px;
+  }
+
+  .hero-line-subtitle {
+    margin-bottom: 3px;
+  }
 }
 
 .btn-primary {
@@ -618,38 +652,40 @@ h1 {
 
 .autoplay-toggle {
   grid-column: 1 / 3;
-  min-height: 42px;
+  min-height: 44px;
   border-radius: 10px;
   border: 1px solid rgba(67, 54, 35, 0.28);
   background: linear-gradient(180deg, #fffdf4, #f6e3bb);
   color: #3a2b1b;
   font-weight: 600;
   font-size: var(--fs-body);
-  line-height: 1.1;
+  line-height: 1.05;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  white-space: nowrap;
+  gap: 1px;
+  white-space: normal;
   overflow: hidden;
   text-overflow: clip;
 }
 
 .mute-toggle {
   grid-column: 3 / 5;
-  min-height: 42px;
+  min-height: 44px;
   border-radius: 10px;
   border: 1px solid rgba(67, 54, 35, 0.28);
   background: linear-gradient(180deg, #fffdf4, #f6e3bb);
   color: #3a2b1b;
   font-weight: 600;
   font-size: var(--fs-body);
-  line-height: 1.1;
+  line-height: 1.05;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 4px;
-  white-space: nowrap;
+  gap: 1px;
+  white-space: normal;
   overflow: hidden;
   text-overflow: clip;
 }
@@ -657,6 +693,10 @@ h1 {
 .toggle-label,
 .toggle-state {
   white-space: nowrap;
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: clip;
 }
 
 .toggle-state {
@@ -1857,6 +1897,27 @@ h1 {
 }
 
 @media (pointer: coarse) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 0;
+    column-gap: 0;
+    min-height: 100dvh;
+  }
+
+  .game {
+    --space-stack: 8px;
+    max-width: none;
+    grid-column: 1;
+    min-height: 100dvh;
+    margin: 0;
+    border-radius: 0;
+    border: 0;
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-bottom: max(8px, env(safe-area-inset-bottom));
+    padding-left: max(10px, env(safe-area-inset-left));
+    padding-right: max(10px, env(safe-area-inset-right));
+  }
+
   .monaco-editor,
   .monaco-editor .view-lines,
   .monaco-editor textarea {
