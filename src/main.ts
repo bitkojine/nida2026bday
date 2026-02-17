@@ -419,6 +419,7 @@ const HORSE_VISUAL_FPS_FINE = 60;
 const LANE_VISUAL_FPS_COARSE = 34;
 const LANE_VISUAL_FPS_FINE = 60;
 const COMPILE_NOTICE_RAIL_MIN_WIDTH_PX = 1080;
+const COMPILE_NOTICE_RAIL_CONTENT_GAP_PX = 10;
 
 let rules: DanceRules = DEFAULT_RULES;
 let mood: HorseMood = 'GERAI';
@@ -813,11 +814,26 @@ function useDesktopCompileNoticeRail(): boolean {
   return finePointer && hoverCapable && window.innerWidth >= COMPILE_NOTICE_RAIL_MIN_WIDTH_PX;
 }
 
+function syncCompileNoticeRailLayout(): void {
+  if (!useDesktopCompileNoticeRail()) {
+    compileNoticeRailEl.style.removeProperty('--compile-rail-measured-width');
+    return;
+  }
+  const layoutEl = compileNoticeRailEl.parentElement;
+  const layoutStyle = layoutEl ? window.getComputedStyle(layoutEl) : null;
+  const leftInset = Number.parseFloat(layoutStyle?.paddingLeft ?? '0') || 0;
+  const gameRect = gameScreen.getBoundingClientRect();
+  const width = Math.floor(gameRect.left - leftInset - COMPILE_NOTICE_RAIL_CONTENT_GAP_PX);
+  const safeWidth = Math.max(0, width);
+  compileNoticeRailEl.style.setProperty('--compile-rail-measured-width', `${safeWidth}px`);
+}
+
 function shouldRenderWeatherCanvasTechnicalNoticePanel(): boolean {
   return !useDesktopCompileNoticeRail();
 }
 
 function renderCompileNoticeRail(): void {
+  syncCompileNoticeRailLayout();
   if (compileIsValid) {
     compileNoticeRailEl.hidden = true;
     compileNoticeToggleEl.setAttribute('aria-expanded', 'false');
@@ -3192,6 +3208,22 @@ declare global {
         autoPlayedBeatIds: number;
         songPlayedBeatIds: number;
       };
+      readResourceStats(): {
+        activeEventListeners: number;
+        activeTimeouts: number;
+        activeIntervals: number;
+        activeRafs: number;
+        activeAbortControllers: number;
+        activeResizeObservers: number;
+        activeSyntaxTrees: number;
+        peakEventListeners: number;
+        peakTimeouts: number;
+        peakIntervals: number;
+        peakRafs: number;
+        peakAbortControllers: number;
+        peakResizeObservers: number;
+        peakSyntaxTrees: number;
+      };
     };
   }
 }
@@ -3390,6 +3422,9 @@ window.__rhythmTest = {
       autoPlayedBeatIds: autoPlayedBeatIds.size,
       songPlayedBeatIds: songPlayedBeatIds.size,
     };
+  },
+  readResourceStats() {
+    return readResourceStatsSnapshot();
   },
 };
 
