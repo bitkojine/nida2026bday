@@ -1,11 +1,10 @@
 services:
   - type: web
     name: nida2026bday-real-compiler
-    env: dotnet
+    runtime: docker
     plan: free
-    rootDir: backend/RealCompilerApi
-    buildCommand: dotnet publish -c Release -o out
-    startCommand: dotnet out/RealCompilerApi.dll
+    dockerfilePath: backend/RealCompilerApi/Dockerfile
+    dockerContext: .
     healthCheckPath: /health
     envVars:
       - key: FRONTEND_ORIGIN
