@@ -86,4 +86,30 @@ describe('realCompilerService', () => {
       }),
     );
   });
+
+  it('times out real compiler request and returns explicit timeout error', async () => {
+    vi.stubEnv('VITE_REAL_COMPILER_API_URL', 'https://compiler.example');
+    globalThis.fetch = vi.fn((_, init) => {
+      const signal = init?.signal as AbortSignal | undefined;
+      return new Promise<Response>((_resolve, reject) => {
+        signal?.addEventListener(
+          'abort',
+          () => {
+            reject(new DOMException('Aborted', 'AbortError'));
+          },
+          { once: true },
+        );
+      });
+    }) as unknown as typeof fetch;
+
+    const result = await checkWithRealCompiler('code', { timeoutMs: 30 });
+    expect(result).toMatchObject({
+      kind: 'error',
+      reason: expect.stringContaining('viršytas tikrinimo laikas'),
+      details: expect.objectContaining({
+        endpoint: 'https://compiler.example/api/csharp/compile',
+        responseStatus: null,
+      }),
+    });
+  });
 });

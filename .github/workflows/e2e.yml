@@ -143,3 +143,12 @@ jobs:
           path: playwright-report
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Upload resource soak timelines
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resource-soak-timeline-${{ matrix.project }}
+          path: test-results/**/resource-soak-*.json
+          if-no-files-found: ignore
+          retention-days: 14

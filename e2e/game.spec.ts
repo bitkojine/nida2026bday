@@ -1,4 +1,5 @@
 import { expect, test } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
 
 async function updateDanceRulesCode(
   page: import('@playwright/test').Page,
@@ -1784,6 +1785,115 @@ test.describe('Rhythm game flow', () => {
     expect(secondSample.songPlayedBeatIds).toBeLessThanOrEqual(512);
   });
 
+  test('@perf-common long-soak keeps resource counters bounded and emits timeline artifact', async ({
+    page,
+  }, testInfo) => {
+    if (testInfo.project.name !== 'desktop-chromium') {
+      return;
+    }
+
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(true);
+      window.__rhythmTest?.resetScore();
+    });
+
+    type SoakSample = {
+      elapsedSec: number;
+      resources: ReturnType<NonNullable<Window['__rhythmTest']>['readResourceStats']>;
+      perf: ReturnType<NonNullable<Window['__rhythmTest']>['readPerformance']>;
+      playback: ReturnType<NonNullable<Window['__rhythmTest']>['readPlaybackTracking']>;
+    };
+    const samples: SoakSample[] = [];
+    const startedAtMs = Date.now();
+    for (let i = 0; i < 26; i += 1) {
+      const snapshot = await page.evaluate(() => {
+        return {
+          resources: window.__rhythmTest?.readResourceStats() ?? null,
+          perf: window.__rhythmTest?.readPerformance() ?? null,
+          playback: window.__rhythmTest?.readPlaybackTracking() ?? null,
+        };
+      });
+      expect(snapshot.resources).not.toBeNull();
+      expect(snapshot.perf).not.toBeNull();
+      expect(snapshot.playback).not.toBeNull();
+      if (!snapshot.resources || !snapshot.perf || !snapshot.playback) {
+        return;
+      }
+      samples.push({
+        elapsedSec: Number(((Date.now() - startedAtMs) / 1000).toFixed(1)),
+        resources: snapshot.resources,
+        perf: snapshot.perf,
+        playback: snapshot.playback,
+      });
+      await page.waitForTimeout(1000);
+    }
+
+    const baseline = samples[0].resources;
+    const maxActiveListeners = Math.max(
+      ...samples.map((sample) => sample.resources.activeEventListeners),
+    );
+    const maxActiveTimeouts = Math.max(...samples.map((sample) => sample.resources.activeTimeouts));
+    const maxActiveIntervals = Math.max(
+      ...samples.map((sample) => sample.resources.activeIntervals),
+    );
+    const maxActiveRafs = Math.max(...samples.map((sample) => sample.resources.activeRafs));
+    const maxActiveAbort = Math.max(
+      ...samples.map((sample) => sample.resources.activeAbortControllers),
+    );
+    const maxActiveObservers = Math.max(
+      ...samples.map((sample) => sample.resources.activeResizeObservers),
+    );
+    const maxActiveSyntaxTrees = Math.max(
+      ...samples.map((sample) => sample.resources.activeSyntaxTrees),
+    );
+    const final = samples[samples.length - 1].resources;
+
+    expect(maxActiveListeners).toBeLessThanOrEqual(baseline.activeEventListeners + 2);
+    expect(final.activeEventListeners).toBeLessThanOrEqual(baseline.activeEventListeners + 1);
+    expect(maxActiveTimeouts).toBeLessThanOrEqual(24);
+    expect(maxActiveIntervals).toBeLessThanOrEqual(2);
+    expect(maxActiveRafs).toBeLessThanOrEqual(4);
+    expect(maxActiveAbort).toBeLessThanOrEqual(3);
+    expect(maxActiveObservers).toBeLessThanOrEqual(2);
+    expect(maxActiveSyntaxTrees).toBeLessThanOrEqual(1);
+
+    expect(samples.every((sample) => sample.playback.autoPlayedBeatIds <= 256)).toBe(true);
+    expect(samples.every((sample) => sample.playback.songPlayedBeatIds <= 512)).toBe(true);
+    expect(samples.some((sample) => sample.perf.fps >= 30)).toBe(true);
+
+    const artifactPath = testInfo.outputPath(`resource-soak-${testInfo.project.name}.json`);
+    await writeFile(
+      artifactPath,
+      JSON.stringify(
+        {
+          project: testInfo.project.name,
+          collectedAt: new Date().toISOString(),
+          baseline,
+          final,
+          summary: {
+            maxActiveListeners,
+            maxActiveTimeouts,
+            maxActiveIntervals,
+            maxActiveRafs,
+            maxActiveAbort,
+            maxActiveObservers,
+            maxActiveSyntaxTrees,
+          },
+          samples,
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+    await testInfo.attach('resource-soak-timeline', {
+      path: artifactPath,
+      contentType: 'application/json',
+    });
+  });
+
   test('changing C# points changes real scoring speed', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
@@ -2188,7 +2298,9 @@ test.describe('Rhythm game flow', () => {
     await expect(page.locator('#gameScreen')).toBeVisible();
     await ensureCodeStudioOpen(page);
     await page.locator('#realCompilerCheckButton').click();
-    await expect(page.locator('#realCompilerStatus')).not.toContainText('tikrina kodą');
+    await expect(page.locator('#realCompilerStatus')).not.toContainText('tikrina kodą', {
+      timeout: 12000,
+    });
 
     const dispatchTechnicalIconPointer = async (
       canvasSelector: '#weatherSceneCanvas' | '#horseCanvas',

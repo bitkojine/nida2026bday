@@ -108,7 +108,7 @@ app.innerHTML = `
   <main class="layout">
     <aside class="compile-notice-rail" id="compileNoticeRail" hidden>
       <div class="compile-notice-card">
-        <p class="compile-notice-text" id="compileNoticeText">KODAS NESIKOMPILIUOJA</p>
+        <div class="compile-notice-text" id="compileNoticeText">KODAS NESIKOMPILIUOJA</div>
         <button
           class="compile-notice-toggle"
           id="compileNoticeToggle"
@@ -139,7 +139,7 @@ app.innerHTML = `
       <section class="horse-stage" aria-label="Arklio scena">
         <canvas id="horseCanvas" aria-label="Šokantis arklys"></canvas>
         <aside class="horse-compile-notice" id="horseCompileNotice" hidden>
-          <pre class="horse-compile-notice-text" id="horseCompileNoticeText">KODAS NESIKOMPILIUOJA</pre>
+          <div class="horse-compile-notice-text" id="horseCompileNoticeText">KODAS NESIKOMPILIUOJA</div>
           <button
             class="horse-compile-notice-toggle"
             id="horseCompileNoticeToggle"
@@ -472,6 +472,7 @@ let compileIsValid = true;
 let latestCompileResult: CompileResult | null = null;
 let latestRealCompilerNotice = 'Tikras C# kompiliatorius dar nepaleistas rankiniu mygtuku.';
 let latestRealCompilerDetailLines = ['Tikro C# kompiliatoriaus užklausos dar nėra.'];
+let latestRealCompilerDetails: RealCompilerDebugDetails | null = null;
 let cachedTechnicalNoticeSignature = '';
 let cachedTechnicalNoticeLines: string[] | null = null;
 let technicalNoticeExpanded = false;
@@ -717,15 +718,143 @@ function setCompileValidityState(isValid: boolean, result: CompileResult): void 
   renderHorseCompileNotice();
 }
 
-function setRealCompilerNotice(message: string, detailLines?: string[]): void {
+function setRealCompilerNotice(
+  message: string,
+  detailLines?: string[],
+  details?: RealCompilerDebugDetails | null,
+): void {
   latestRealCompilerNotice = message.trim();
   if (detailLines) {
     latestRealCompilerDetailLines = detailLines;
+  }
+  if (details !== undefined) {
+    latestRealCompilerDetails = details;
   }
   cachedTechnicalNoticeSignature = '';
   cachedTechnicalNoticeLines = null;
   renderCompileNoticeRail();
   renderHorseCompileNotice();
+}
+
+function prettyJsonOrRaw(value: string | null): string {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized) {
+    return '(tuščia)';
+  }
+  try {
+    return JSON.stringify(JSON.parse(normalized), null, 2);
+  } catch {
+    return normalized;
+  }
+}
+
+function highlightJsonForNotice(value: string): string {
+  const tokenRegex =
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?|[{}[\],:])/g;
+  let html = '';
+  let cursor = 0;
+  for (const match of value.matchAll(tokenRegex)) {
+    const index = match.index ?? 0;
+    if (index > cursor) {
+      html += escapeHtml(value.slice(cursor, index));
+    }
+    const token = match[0];
+    const isKey = Boolean(match[3]);
+    const className = isKey
+      ? 'json-key'
+      : match[4]
+        ? 'json-literal'
+        : /^-?\d/.test(token)
+          ? 'json-number'
+          : token.startsWith('"')
+            ? 'json-string'
+            : 'json-punctuation';
+    const escapedToken = escapeHtml(token);
+    const renderedToken =
+      className === 'json-string' && !isKey
+        ? escapedToken.replaceAll('\\r\\n', '\n').replaceAll('\\n', '\n').replaceAll('\\r', '\n')
+        : escapedToken;
+    html += `<span class="${className}">${renderedToken}</span>`;
+    cursor = index + token.length;
+  }
+  if (cursor < value.length) {
+    html += escapeHtml(value.slice(cursor));
+  }
+  return html;
+}
+
+function formatJsonCodeBlockMarkup(value: string): string {
+  const normalized = value.trim();
+  if (!normalized || normalized === '(tuščia)' || normalized === '(nėra duomenų)') {
+    return escapeHtml(value);
+  }
+  try {
+    JSON.parse(normalized);
+    return highlightJsonForNotice(value);
+  } catch {
+    return escapeHtml(value);
+  }
+}
+
+function buildTechnicalNoticeMarkup(): string {
+  const result = latestCompileResult;
+  const syntaxLine =
+    result?.syntaxEngine === 'tree-sitter-wasm'
+      ? 'Tree-sitter C# (WASM) sintaksės analizatorius aktyvus.'
+      : 'WASM sintaksės analizatorius nepasiekiamas; taikoma atsarginė C# struktūros patikra.';
+  const modeLine =
+    result?.mode === 'wasm'
+      ? 'Pilnas tikrinimo režimas (WASM komponentai pasiekiami).'
+      : 'Atsarginis tikrinimo režimas (dalis WASM komponentų nepasiekiama).';
+  const statusLine = result?.success ? 'Kodas sukompiliuotas.' : 'Kodas nesikompiliuoja.';
+  const errorLine = result?.errors[0] ?? 'Nenurodyta.';
+  const details = latestRealCompilerDetails;
+  const requestHeadersPrettyRaw = details
+    ? prettyJsonOrRaw(JSON.stringify(details.requestHeaders ?? {}, null, 2))
+    : '(nėra duomenų)';
+  const requestBodyPrettyRaw = details ? prettyJsonOrRaw(details.requestBody) : '(nėra duomenų)';
+  const responseBodyPrettyRaw = details ? prettyJsonOrRaw(details.responseBody) : '(nėra duomenų)';
+  const requestHeadersPretty = formatJsonCodeBlockMarkup(requestHeadersPrettyRaw);
+  const requestBodyPretty = formatJsonCodeBlockMarkup(requestBodyPrettyRaw);
+  const responseBodyPretty = formatJsonCodeBlockMarkup(responseBodyPrettyRaw);
+  const checkedAt = details?.checkedAtIso ?? '(nežinoma)';
+  const endpoint = details?.endpoint?.trim() || '(nenurodytas)';
+  const method = details?.requestMethod ?? 'POST';
+  const responseStatus =
+    details?.responseStatus === null || details?.responseStatus === undefined
+      ? '(negautas)'
+      : `${details.responseStatus}`;
+
+  return [
+    '<div class="compile-notice-sections">',
+    '<p><strong>KODAS NESIKOMPILIUOJA</strong></p>',
+    '<p><strong>1) Sintaksės tikrinimas</strong><br>',
+    `${escapeHtml(syntaxLine)}<br>${escapeHtml(modeLine)}</p>`,
+    '<p><strong>2) Struktūros patikra</strong><br>',
+    'DanceRules klasė, skliaustai, enum nariai, AkiuSpalva().</p>',
+    '<p><strong>3) Individualios taisyklės</strong><br>',
+    'gerasLangas turi būti &gt;= tobulasLangas.</p>',
+    '<p><strong>4) Rezultatas</strong><br>',
+    `${escapeHtml(statusLine)}</p>`,
+    '<p><strong>5) Tikras C# kompiliatorius</strong><br>',
+    `${escapeHtml(latestRealCompilerNotice)}</p>`,
+    '<p><strong>6) Tikro C# kompiliatoriaus užklausos detalės</strong></p>',
+    '<p>',
+    `Tikrinta: ${escapeHtml(checkedAt)}<br>`,
+    `Endpoint: ${escapeHtml(endpoint)}<br>`,
+    `Užklausos metodas: ${escapeHtml(method)}<br>`,
+    `Atsakymo statusas: ${escapeHtml(responseStatus)}`,
+    '</p>',
+    '<p><strong>Užklausos antraštės (JSON)</strong></p>',
+    `<pre class="compile-notice-code">${requestHeadersPretty}</pre>`,
+    '<p><strong>Užklausa (JSON)</strong></p>',
+    `<pre class="compile-notice-code">${requestBodyPretty}</pre>`,
+    '<p><strong>Atsakymas (JSON)</strong></p>',
+    `<pre class="compile-notice-code">${responseBodyPretty}</pre>`,
+    '<p><strong>7) Klaida</strong><br>',
+    `${escapeHtml(errorLine)}</p>`,
+    '</div>',
+  ].join('');
 }
 
 function buildRealCompilerSummary(result: RealCompilerCheckResult): string {
@@ -848,8 +977,11 @@ function renderCompileNoticeRail(): void {
   }
   const fullLines = buildTechnicalCompileNoticeLines();
   const compactLines = [fullLines[0] ?? 'KODAS NESIKOMPILIUOJA', 'DAR REIKIA PADIRBETI'];
-  const linesToRender = technicalNoticeExpanded ? fullLines : compactLines;
-  compileNoticeTextEl.textContent = linesToRender.join('\n');
+  if (technicalNoticeExpanded) {
+    compileNoticeTextEl.innerHTML = buildTechnicalNoticeMarkup();
+    return;
+  }
+  compileNoticeTextEl.textContent = compactLines.join('\n');
 }
 
 function renderHorseCompileNotice(): void {
@@ -870,8 +1002,11 @@ function renderHorseCompileNotice(): void {
   }
   const fullLines = buildTechnicalCompileNoticeLines();
   const compactLines = [fullLines[0] ?? 'KODAS NESIKOMPILIUOJA', 'DAR REIKIA PADIRBETI'];
-  const linesToRender = technicalNoticeExpanded ? fullLines : compactLines;
-  horseCompileNoticeTextEl.textContent = linesToRender.join('\n');
+  if (technicalNoticeExpanded) {
+    horseCompileNoticeTextEl.innerHTML = buildTechnicalNoticeMarkup();
+    return;
+  }
+  horseCompileNoticeTextEl.textContent = compactLines.join('\n');
 }
 
 function isPointerInsideTechnicalIcon(
@@ -1293,7 +1428,7 @@ function wireRealCompilerCheck(): void {
     } else {
       realCompilerStatusEl.textContent = summary;
     }
-    setRealCompilerNotice(summary, details);
+    setRealCompilerNotice(summary, details, result.details);
   };
 
   realCompilerScope.add(

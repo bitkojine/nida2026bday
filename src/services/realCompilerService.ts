@@ -46,6 +46,7 @@ interface RealCompilerApiPayload {
 }
 
 const DEFAULT_REAL_COMPILER_API_URL = 'https://nida2026bday-real-compiler.onrender.com';
+const REAL_COMPILER_TIMEOUT_MS = 6000;
 
 function readRealCompilerApiUrl(): string {
   const value = import.meta.env.VITE_REAL_COMPILER_API_URL;
@@ -72,7 +73,7 @@ function isAbortError(error: unknown): boolean {
 
 export async function checkWithRealCompiler(
   source: string,
-  options?: { signal?: AbortSignal },
+  options?: { signal?: AbortSignal; timeoutMs?: number },
 ): Promise<RealCompilerCheckResult> {
   const apiUrl = readRealCompilerApiUrl();
   const endpoint = `${apiUrl.replace(/\/$/, '')}/api/csharp/compile`;
@@ -98,6 +99,23 @@ export async function checkWithRealCompiler(
   }
 
   let response: Response;
+  const timeoutMs = Math.max(500, Math.floor(options?.timeoutMs ?? REAL_COMPILER_TIMEOUT_MS));
+  const requestController = new AbortController();
+  let timedOut = false;
+  let timeoutId: number | null = null;
+  const abortFromParent = (): void => {
+    requestController.abort();
+  };
+
+  if (options?.signal?.aborted) {
+    return { kind: 'aborted', details: baseDetails };
+  }
+  options?.signal?.addEventListener('abort', abortFromParent, { once: true });
+  timeoutId = window.setTimeout(() => {
+    timedOut = true;
+    requestController.abort();
+  }, timeoutMs);
+
   try {
     response = await fetch(endpoint, {
       method: 'POST',
@@ -105,10 +123,22 @@ export async function checkWithRealCompiler(
         'content-type': 'application/json',
       },
       body: requestBody,
-      signal: options?.signal,
+      signal: requestController.signal,
     });
   } catch (error) {
+    if (timeoutId !== null) {
+      window.clearTimeout(timeoutId);
+      timeoutId = null;
+    }
+    options?.signal?.removeEventListener('abort', abortFromParent);
     if (isAbortError(error)) {
+      if (timedOut) {
+        return {
+          kind: 'error',
+          reason: `viršytas tikrinimo laikas (${timeoutMs} ms).`,
+          details: baseDetails,
+        };
+      }
       return { kind: 'aborted', details: baseDetails };
     }
     return {
@@ -117,6 +147,11 @@ export async function checkWithRealCompiler(
       details: baseDetails,
     };
   }
+  if (timeoutId !== null) {
+    window.clearTimeout(timeoutId);
+    timeoutId = null;
+  }
+  options?.signal?.removeEventListener('abort', abortFromParent);
 
   const responseText = await response.text().catch(() => '');
   const details: RealCompilerDebugDetails = {

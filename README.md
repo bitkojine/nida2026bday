@@ -16,6 +16,7 @@ Mobile-first ritmo žaidimas su gyvu C# taisyklių redagavimu naršyklėje.
 - [Išsaugojimas localStorage](#išsaugojimas-localstorage)
 - [Poraštė ir diagnostika](#poraštė-ir-diagnostika)
 - [Atminties nutekėjimų prevencijos architektūra](#atminties-nutekėjimų-prevencijos-architektūra)
+- [Test double inventorius](#test-double-inventorius)
 - [30 sekundžių patikros biudžetas](#30-sekundžių-patikros-biudžetas)
 - [Testavimas](#testavimas)
 - [Skriptai](#skriptai)
@@ -204,6 +205,47 @@ Tradeoff (ką paaukojame):
 - skaitikliai matuoja app resursų gyvavimo tvarką, bet ne absoliučią naršyklės atmintį
 
 Rezultatas: sąmoningai keičiame patogumą į patikimumą. Šiame projekte tai laikoma teisingu kompromisu.
+
+## Test double inventorius
+
+Tikslas: turėti pilną dabartinių test double naudojimų sąrašą ir palaipsniui mažinti jų kiekį, ypač ten, kur galima testuoti realų srautą.
+
+### Vitest mock/stub (`vi.fn`, `vi.stubEnv`, `globalThis.fetch` stub)
+
+- `tests/compileFeedbackRace.test.ts`
+- `tests/compileFeedback.test.ts`
+- `tests/realCompilerService.test.ts`
+- `tests/syntaxTreeResource.test.ts`
+- `tests/codeCompilerService.test.ts`
+- `tests/lifecycleBindings.test.ts`
+- `tests/runtimeScope.test.ts`
+
+### Rankiniai fake objektai / klasės testuose
+
+- `tests/lifecycleBindings.test.ts`
+  - `FakeEventHub`
+  - `FakeResizeObserver`
+- `tests/gameAudio.test.ts`
+  - `FakeAudioParam`
+  - `FakeAudioNode`
+  - `FakeGainNode`
+  - `FakeOscillatorNode`
+  - `FakeBiquadFilterNode`
+  - `FakeWaveShaperNode`
+  - `FakeAudioContext`
+- `tests/trackedAsync.test.ts`
+  - `FakeWindowTimers`
+
+### E2E tinklo test doubles (`page.route` / `route.fulfill`)
+
+- `e2e/game.spec.ts`
+  - real compiler endpoint intercept scenarijus (`page.route(...)`, `route.fulfill(...)`)
+
+### Pastaba dėl krypties
+
+- kryptis: mažinti test double naudojimą ten, kur tai ne būtina
+- prioritetas: kritinius srautus (mobilus veikimas, real compiler mygtukas, progreso išsaugojimas, perf) laikyti kuo arčiau realaus runtime elgesio
+- prieš šalinant test double, užtikrinti ekvivalentišką ar geresnę aprėptį realiais integraciniais/E2E testais
 
 ## 30 sekundžių patikros biudžetas
 
