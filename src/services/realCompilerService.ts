@@ -100,21 +100,14 @@ export async function checkWithRealCompiler(
 
   let response: Response;
   const timeoutMs = Math.max(500, Math.floor(options?.timeoutMs ?? REAL_COMPILER_TIMEOUT_MS));
-  const requestController = new AbortController();
-  let timedOut = false;
-  let timeoutId: number | null = null;
-  const abortFromParent = (): void => {
-    requestController.abort();
-  };
+  const timeoutSignal = AbortSignal.timeout(timeoutMs);
+  const requestSignal = options?.signal
+    ? AbortSignal.any([options.signal, timeoutSignal])
+    : timeoutSignal;
 
   if (options?.signal?.aborted) {
     return { kind: 'aborted', details: baseDetails };
   }
-  options?.signal?.addEventListener('abort', abortFromParent, { once: true });
-  timeoutId = window.setTimeout(() => {
-    timedOut = true;
-    requestController.abort();
-  }, timeoutMs);
 
   try {
     response = await fetch(endpoint, {
@@ -123,22 +116,17 @@ export async function checkWithRealCompiler(
         'content-type': 'application/json',
       },
       body: requestBody,
-      signal: requestController.signal,
+      signal: requestSignal,
     });
   } catch (error) {
-    if (timeoutId !== null) {
-      window.clearTimeout(timeoutId);
-      timeoutId = null;
+    if (timeoutSignal.aborted && !(options?.signal?.aborted ?? false)) {
+      return {
+        kind: 'error',
+        reason: `viršytas tikrinimo laikas (${timeoutMs} ms).`,
+        details: baseDetails,
+      };
     }
-    options?.signal?.removeEventListener('abort', abortFromParent);
     if (isAbortError(error)) {
-      if (timedOut) {
-        return {
-          kind: 'error',
-          reason: `viršytas tikrinimo laikas (${timeoutMs} ms).`,
-          details: baseDetails,
-        };
-      }
       return { kind: 'aborted', details: baseDetails };
     }
     return {
@@ -147,11 +135,6 @@ export async function checkWithRealCompiler(
       details: baseDetails,
     };
   }
-  if (timeoutId !== null) {
-    window.clearTimeout(timeoutId);
-    timeoutId = null;
-  }
-  options?.signal?.removeEventListener('abort', abortFromParent);
 
   const responseText = await response.text().catch(() => '');
   const details: RealCompilerDebugDetails = {
