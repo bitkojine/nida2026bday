@@ -17,7 +17,7 @@ export interface PuzzleProgress {
   nextPuzzle: CodePuzzle | null;
 }
 
-const DEFAULT_BODY_COLOR = '#d6b48a';
+const DEFAULT_BODY_COLOR = 'SMELIO';
 
 export const CODE_PUZZLES: CodePuzzle[] = [
   {
@@ -64,14 +64,13 @@ export const CODE_PUZZLES: CodePuzzle[] = [
     goalLt:
       'Naudok karūną, pakeisk oro efektą iš SAULETA ir pasirink kitą kūno spalvą nei numatytoji.',
     hintLt:
-      'Nustatyk `kepuresTipas = "KARUNA"`, pasirink `oroEfektas` (ne SAULETA) ir pakeisk `arklioSpalva`.',
+      'Nustatyk `kepuresTipas = KepuresTipas.KARUNA`, pasirink `oroEfektas` (ne SAULETA) ir pakeisk `arklioSpalva`.',
     templateId: 'karnavaline-kepure',
-    check: (rules, source) =>
+    check: (rules) =>
       rules.suKepure &&
       rules.kepuresTipas === 'KARUNA' &&
       rules.oroEfektas !== 'SAULETA' &&
-      rules.arklioSpalva.toLowerCase() !== DEFAULT_BODY_COLOR &&
-      source.includes('ArUzsivedimui'),
+      rules.arklioSpalva !== DEFAULT_BODY_COLOR,
   },
 ];
 

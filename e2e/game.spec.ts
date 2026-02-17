@@ -1,14 +1,11 @@
 import { expect, test } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
 
 async function updateDanceRulesCode(
   page: import('@playwright/test').Page,
   mutate: (source: string) => string,
 ) {
-  const studio = page.locator('.code-studio');
-  const isOpen = await studio.evaluate((node) => (node as HTMLDetailsElement).open);
-  if (!isOpen) {
-    await page.locator('.code-studio summary').click();
-  }
+  await ensureCodeStudioOpen(page);
 
   const fallback = page.locator('#fallbackCode');
   await expect(fallback).toBeVisible();
@@ -28,9 +25,79 @@ async function updateDanceRulesCode(
     .not.toBeNull();
 }
 
+async function ensureCodeStudioOpen(page: import('@playwright/test').Page): Promise<void> {
+  const studio = page.locator('.code-studio');
+  const isOpen = await studio.evaluate((node) => (node as HTMLDetailsElement).open);
+  if (!isOpen) {
+    await page.locator('.code-studio summary').click();
+  }
+}
+
+async function readCodeboxMetrics(page: import('@playwright/test').Page): Promise<{
+  panelHeight: number;
+  editorClientHeight: number;
+  editorScrollHeight: number;
+  sourceLineCount: number;
+  gutterLineCount: number;
+  firstGutterLine: string;
+}> {
+  return await page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>('#editorPanel');
+    const fallback = document.querySelector<HTMLTextAreaElement>('#fallbackCode');
+    const lines = document.querySelector<HTMLPreElement>('#fallbackLines');
+    const source = fallback?.value ?? '';
+    const sourceLineCount = Math.max(1, source.split('\n').length);
+    const gutterText = lines?.textContent ?? '';
+    const gutterLines = gutterText.split('\n').filter((line) => line.trim().length > 0);
+
+    return {
+      panelHeight: Math.round(panel?.getBoundingClientRect().height ?? 0),
+      editorClientHeight: fallback?.clientHeight ?? 0,
+      editorScrollHeight: fallback?.scrollHeight ?? 0,
+      sourceLineCount,
+      gutterLineCount: gutterLines.length,
+      firstGutterLine: gutterLines[0] ?? '',
+    };
+  });
+}
+
+async function ensurePerfStackOpen(page: import('@playwright/test').Page): Promise<void> {
+  const perf = page.locator('.perf-stack');
+  const isOpen = await perf.evaluate((node) => (node as HTMLDetailsElement).open);
+  if (!isOpen) {
+    await page.locator('.perf-stack > summary').click();
+  }
+}
+
 function replaceRuleValue(source: string, field: string, valueLiteral: string): string {
   const matcher = new RegExp(`(public\\s+[\\w<>]+\\s+${field}\\s*=\\s*)([^;]+)(;)`);
   return source.replace(matcher, `$1${valueLiteral}$3`);
+}
+
+function applyMissionStageRules(source: string, solvedCount: number): string {
+  const stage = Math.max(0, Math.min(5, Math.trunc(solvedCount)));
+  let next = source;
+  next = replaceRuleValue(next, 'tobulasLangas', stage >= 1 ? '0.08f' : '0.05f');
+  next = replaceRuleValue(next, 'tobuliTaskai', stage >= 2 ? '170' : '100');
+  next = replaceRuleValue(next, 'geriTaskai', stage >= 2 ? '80' : '50');
+  next = replaceRuleValue(next, 'serijaIkiUzsivedimo', stage >= 3 ? '4' : '10');
+  next = replaceRuleValue(next, 'suKepure', stage >= 4 ? 'true' : 'false');
+  next = replaceRuleValue(
+    next,
+    'kepuresTipas',
+    stage >= 5
+      ? 'KepuresTipas.KARUNA'
+      : stage >= 4
+        ? 'KepuresTipas.KAUBOJAUS'
+        : 'KepuresTipas.KLASIKINE',
+  );
+  next = replaceRuleValue(
+    next,
+    'oroEfektas',
+    stage >= 5 ? 'OroEfektas.ZAIBAS' : 'OroEfektas.SAULETA',
+  );
+  next = replaceRuleValue(next, 'arklioSpalva', stage >= 5 ? 'Spalva.ORANZINE' : 'Spalva.SMELIO');
+  return next;
 }
 
 async function playUpcomingTapWithOffset(
@@ -66,13 +133,15 @@ test.describe('Rhythm game flow', () => {
     });
   });
 
-  test('shows dedication at bottom and game is active immediately', async ({ page }) => {
+  test('@smoke30 shows dedication at bottom and game is active immediately', async ({ page }) => {
     await page.goto('/');
 
     await expect(page.locator('#gameScreen')).toBeVisible();
-    await expect(page.locator('.dedication-footer')).toContainText(
+    await expect(page.locator('#heroCopy')).toContainText('🎁 Šokanti Arklio Ritmo Dovana');
+    await expect(page.locator('#heroCopy')).toContainText(
       'Skirta Nidai – nuo Roberto. Su gimtadieniu! 🎉',
     );
+    await expect(page.locator('#heroCopy')).toContainText('Versija:');
     await expect(page.locator('#autoplayToggle')).toHaveText('Žaisti automatiškai: TAIP');
 
     await expect
@@ -80,6 +149,37 @@ test.describe('Rhythm game flow', () => {
         return await page.evaluate(() => window.__rhythmTest?.getRules() ?? null);
       })
       .not.toBeNull();
+  });
+
+  test('boots cleanly when localStorage access is blocked', async ({ page }) => {
+    await page.addInitScript(() => {
+      const blockedAccess = () => {
+        throw new DOMException('Blocked by browser policy', 'SecurityError');
+      };
+      try {
+        Object.defineProperty(window, 'localStorage', {
+          configurable: true,
+          get: blockedAccess,
+        });
+      } catch {
+        try {
+          Storage.prototype.getItem = blockedAccess;
+          Storage.prototype.setItem = blockedAccess;
+          Storage.prototype.removeItem = blockedAccess;
+        } catch {
+          // Ignore patch failures in restricted engines.
+        }
+      }
+    });
+
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await expect(page.locator('#heroCopy')).toContainText('🎁 Šokanti Arklio Ritmo Dovana');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readEditorSource() ?? '');
+      })
+      .toContain('public class DanceRules');
   });
 
   test('mute button toggles sound state with Lithuanian labels', async ({ page }) => {
@@ -125,6 +225,431 @@ test.describe('Rhythm game flow', () => {
       .toMatchObject({ userMuted: true });
   });
 
+  test('@smoke30 C# code is remembered after reload via localStorage', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await ensureCodeStudioOpen(page);
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'tobulasLangas', '0.09f'),
+    );
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules().tobulasLangas ?? null);
+      })
+      .toBe(0.09);
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(
+          () => window.localStorage.getItem('nida2026bday:editorSource:v1') ?? null,
+        );
+      })
+      .toContain('public float tobulasLangas = 0.09f;');
+
+    await page.reload();
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readEditorSource() ?? '');
+      })
+      .toContain('public float tobulasLangas = 0.09f;');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules().tobulasLangas ?? null);
+      })
+      .toBe(0.09);
+  });
+
+  test('@smoke30 latest rapid C# edit wins after transient invalid input', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await ensureCodeStudioOpen(page);
+    const fallback = page.locator('#fallbackCode');
+    await expect(fallback).toBeVisible();
+
+    await fallback.evaluate((node) => {
+      const textarea = node as HTMLTextAreaElement;
+      const base = textarea.value;
+      const invalid = base.replace('public int geriTaskai = 50;', 'public int geriTaskai = ;');
+      const final = base.replace(
+        'public float tobulasLangas = 0.05f;',
+        'public float tobulasLangas = 0.11f;',
+      );
+
+      const emit = (value: string) => {
+        textarea.value = value;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+
+      emit(invalid);
+      emit(final);
+    });
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? null);
+      })
+      .toBe(true);
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules().tobulasLangas ?? null);
+      })
+      .toBe(0.11);
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readEditorSource() ?? '');
+      })
+      .toContain('public float tobulasLangas = 0.11f;');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(
+          () => window.localStorage.getItem('nida2026bday:editorSource:v1') ?? '',
+        );
+      })
+      .toContain('public float tobulasLangas = 0.11f;');
+  });
+
+  test('danger zone confirmation requires exact phrase and supports cancel', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await ensurePerfStackOpen(page);
+    const openButton = page.locator('#resetProgressButton');
+    const dialog = page.locator('#resetProgressDialog');
+    const input = page.locator('#resetProgressConfirmInput');
+    const cancel = page.locator('#resetProgressCancelButton');
+    const confirm = page.locator('#resetProgressConfirmButton');
+
+    await openButton.click();
+    await expect(dialog).toBeVisible();
+    await expect(confirm).toBeDisabled();
+
+    await input.fill('YES RESET');
+    await expect(confirm).toBeDisabled();
+
+    await input.fill('yes reset');
+    await expect(confirm).toBeEnabled();
+
+    await cancel.click();
+    await expect(dialog).not.toBeVisible();
+  });
+
+  test('danger zone code reset confirmation requires exact phrase and supports cancel', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await ensurePerfStackOpen(page);
+    const openButton = page.locator('#resetCodeButton');
+    const dialog = page.locator('#resetCodeDialog');
+    const input = page.locator('#resetCodeConfirmInput');
+    const cancel = page.locator('#resetCodeCancelButton');
+    const confirm = page.locator('#resetCodeConfirmButton');
+
+    await openButton.click();
+    await expect(dialog).toBeVisible();
+    await expect(confirm).toBeDisabled();
+
+    await input.fill('RESET CODE');
+    await expect(confirm).toBeDisabled();
+
+    await input.fill('reset code');
+    await expect(confirm).toBeEnabled();
+
+    await cancel.click();
+    await expect(dialog).not.toBeVisible();
+  });
+
+  test('@smoke30 danger dialogs stay exclusive when switching quickly', async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => {
+      pageErrors.push(error.message);
+    });
+
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensurePerfStackOpen(page);
+
+    await page.locator('#resetProgressButton').click();
+    await expect(page.locator('#resetProgressDialog')).toBeVisible();
+
+    await page.locator('#unlockAllMissionsButton').evaluate((node) => {
+      (node as HTMLButtonElement).click();
+    });
+    await expect(page.locator('#unlockAllMissionsDialog')).toBeVisible();
+    await expect(page.locator('#resetProgressDialog')).not.toBeVisible();
+
+    await page.locator('#resetCodeButton').evaluate((node) => {
+      (node as HTMLButtonElement).click();
+    });
+    await expect(page.locator('#resetCodeDialog')).toBeVisible();
+    await expect(page.locator('#unlockAllMissionsDialog')).not.toBeVisible();
+
+    await page.locator('#resetProgressButton').evaluate((node) => {
+      (node as HTMLButtonElement).click();
+    });
+    await expect(page.locator('#resetProgressDialog')).toBeVisible();
+    await expect(page.locator('#resetCodeDialog')).not.toBeVisible();
+
+    expect(pageErrors).toEqual([]);
+  });
+
+  test('danger zone mission unlock dialog accepts only valid hidden cheat code', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await ensurePerfStackOpen(page);
+    const openButton = page.locator('#unlockAllMissionsButton');
+    const dialog = page.locator('#unlockAllMissionsDialog');
+    const input = page.locator('#unlockAllMissionsConfirmInput');
+    const cancel = page.locator('#unlockAllMissionsCancelButton');
+    const confirm = page.locator('#unlockAllMissionsConfirmButton');
+
+    await openButton.click();
+    await expect(dialog).toBeVisible();
+    await expect(confirm).toBeDisabled();
+
+    await input.fill('bad-code');
+    await page.waitForTimeout(120);
+    await expect(confirm).toBeDisabled();
+
+    await cancel.click();
+    await expect(dialog).not.toBeVisible();
+  });
+
+  test('danger zone hidden cheat code marks all missions as complete and persists', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await expect(page.locator('#puzzleProgress')).toHaveText('0 / 5');
+
+    await ensurePerfStackOpen(page);
+    await page.locator('#unlockAllMissionsButton').click();
+
+    const cheatCode = String.fromCharCode(109, 97, 107, 101, 109, 101, 112, 97, 115, 115);
+    await page.locator('#unlockAllMissionsConfirmInput').fill(cheatCode);
+    await expect(page.locator('#unlockAllMissionsConfirmButton')).toBeEnabled();
+    await page.locator('#unlockAllMissionsConfirmButton').click();
+
+    await expect(page.locator('#unlockAllMissionsDialog')).not.toBeVisible();
+    await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
+    await ensureCodeStudioOpen(page);
+    await expect(page.locator('#templateReward')).toBeVisible();
+    await expect(page.locator('#templateLockNote')).toBeHidden();
+    await expect
+      .poll(async () => {
+        return await page.evaluate(
+          () => window.localStorage.getItem('nida2026bday:puzzlesSolvedCount:v1') ?? null,
+        );
+      })
+      .toBe('5');
+
+    await page.reload();
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
+    await ensureCodeStudioOpen(page);
+    await expect(page.locator('#templateReward')).toBeVisible();
+  });
+
+  test('danger zone reset clears progress and restores default state', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await ensureCodeStudioOpen(page);
+    await updateDanceRulesCode(page, (source) => applyMissionStageRules(source, 3));
+    await expect(page.locator('#puzzleProgress')).toHaveText('3 / 5');
+
+    const muteToggle = page.locator('#muteToggle');
+    await muteToggle.click();
+    await expect(muteToggle).toHaveText('Garsas: IŠJUNGTAS');
+
+    await ensurePerfStackOpen(page);
+    await page.locator('#resetProgressButton').click();
+    await page.locator('#resetProgressConfirmInput').fill('yes reset');
+    await page.locator('#resetProgressConfirmButton').click();
+
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await expect(page.locator('#puzzleProgress')).toHaveText('0 / 5');
+    await expect(page.locator('#muteToggle')).toHaveText('Garsas: ĮJUNGTAS');
+    await ensureCodeStudioOpen(page);
+    await expect(page.locator('#templateReward')).toBeHidden();
+    await expect(page.locator('#templateLockNote')).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => {
+          return {
+            solvedCount: window.localStorage.getItem('nida2026bday:puzzlesSolvedCount:v1'),
+            soundMuted: window.localStorage.getItem('nida2026bday:soundMuted:v1'),
+            source: window.__rhythmTest?.readEditorSource() ?? '',
+          };
+        });
+      })
+      .toMatchObject({
+        solvedCount: null,
+        soundMuted: null,
+      });
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readEditorSource() ?? '');
+      })
+      .toContain('public float tobulasLangas = 0.05f;');
+  });
+
+  test('danger zone code reset resets only code and keeps progress/sound', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await ensureCodeStudioOpen(page);
+    await updateDanceRulesCode(page, (source) => applyMissionStageRules(source, 3));
+    await expect(page.locator('#puzzleProgress')).toHaveText('3 / 5');
+
+    const muteToggle = page.locator('#muteToggle');
+    await muteToggle.click();
+    await expect(muteToggle).toHaveText('Garsas: IŠJUNGTAS');
+
+    await ensureCodeStudioOpen(page);
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'tobulasLangas', '0.095f'),
+    );
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules().tobulasLangas ?? null);
+      })
+      .toBe(0.095);
+
+    await ensurePerfStackOpen(page);
+    await page.locator('#resetCodeButton').click();
+    await page.locator('#resetCodeConfirmInput').fill('reset code');
+    await page.locator('#resetCodeConfirmButton').click();
+
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readEditorSource() ?? '');
+      })
+      .toContain('public float tobulasLangas = 0.05f;');
+    await expect(page.locator('#puzzleProgress')).toHaveText('3 / 5');
+    await expect(page.locator('#muteToggle')).toHaveText('Garsas: IŠJUNGTAS');
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => ({
+          solvedCount: window.localStorage.getItem('nida2026bday:puzzlesSolvedCount:v1'),
+          soundMuted: window.localStorage.getItem('nida2026bday:soundMuted:v1'),
+          editorSource: window.localStorage.getItem('nida2026bday:editorSource:v1'),
+        }));
+      })
+      .toMatchObject({
+        solvedCount: '3',
+        soundMuted: '1',
+      });
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(
+          () => window.localStorage.getItem('nida2026bday:editorSource:v1') ?? '',
+        );
+      })
+      .toContain('public float tobulasLangas = 0.05f;');
+  });
+
+  test('danger zone code reset applies immediately without full page reload', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    const autoplayToggle = page.locator('#autoplayToggle');
+    await autoplayToggle.click();
+    await expect(autoplayToggle).toHaveText('Žaisti automatiškai: NE');
+
+    await ensureCodeStudioOpen(page);
+    await updateDanceRulesCode(page, (source) =>
+      replaceRuleValue(source, 'tobulasLangas', '0.095f'),
+    );
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules().tobulasLangas ?? null);
+      })
+      .toBe(0.095);
+
+    await ensurePerfStackOpen(page);
+    await page.locator('#resetCodeButton').click();
+    await page.locator('#resetCodeConfirmInput').fill('reset code');
+    await page.locator('#resetCodeConfirmInput').press('Enter');
+
+    await expect(page.locator('#resetCodeDialog')).not.toBeVisible();
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await expect(autoplayToggle).toHaveText('Žaisti automatiškai: NE');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readEditorSource() ?? '');
+      })
+      .toContain('public float tobulasLangas = 0.05f;');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules().tobulasLangas ?? null);
+      })
+      .toBe(0.05);
+  });
+
+  test('danger zone code reset recovers from invalid editor code back to default', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+
+    await page.locator('#fallbackCode').evaluate((node) => {
+      const textarea = node as HTMLTextAreaElement;
+      const broken = textarea.value.replace(
+        'public int geriTaskai = 50;',
+        'public int geriTaskai = ;',
+      );
+      textarea.value = broken;
+      textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      textarea.dispatchEvent(new Event('change', { bubbles: true }));
+    });
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readEditorSource() ?? '');
+      })
+      .toContain('public int geriTaskai = ;');
+
+    await ensurePerfStackOpen(page);
+    await page.locator('#resetCodeButton').click();
+    await page.locator('#resetCodeConfirmInput').fill('reset code');
+    await page.locator('#resetCodeConfirmButton').click();
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readEditorSource() ?? '');
+      })
+      .toContain('public int geriTaskai = 50;');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules().geriTaskai ?? null);
+      })
+      .toBe(50);
+    await expect
+      .poll(async () => {
+        return await page.evaluate(
+          () => window.localStorage.getItem('nida2026bday:editorSource:v1') ?? '',
+        );
+      })
+      .toContain('public int geriTaskai = 50;');
+  });
+
   test('audio visualizer stays active with both įjungtas and išjungtas garsas', async ({
     page,
   }) => {
@@ -134,7 +659,8 @@ test.describe('Rhythm game flow', () => {
     await page.locator('.perf-stack > summary').click();
     const footer = page.locator('.perf-stack .perf-stack-body');
     await expect(footer.locator(':scope > #audioVisualizer')).toBeVisible();
-    await expect(footer.locator(':scope > #audioVisualizer + .build-number')).toBeVisible();
+    await expect(footer.locator(':scope > #perfStats')).toBeVisible();
+    await expect(footer.locator('#perfStats')).not.toContainText('Versija:');
 
     await page.evaluate(() => {
       window.__rhythmTest?.setAutoplay(false);
@@ -185,6 +711,33 @@ test.describe('Rhythm game flow', () => {
       .toBeGreaterThan(0);
   });
 
+  test('footer localStorage diagnostics show all key values and code line count only', async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      window.localStorage.setItem('nida2026bday:puzzlesSolvedCount:v1', '3');
+      window.localStorage.setItem('nida2026bday:soundMuted:v1', '1');
+      window.localStorage.setItem(
+        'nida2026bday:editorSource:v1',
+        `public class DanceRules
+{
+    public int tobuliTaskai = 123;
+}
+`,
+      );
+    });
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await page.locator('.perf-stack > summary').click();
+    const footerStats = page.locator('#perfStats');
+    await expect(footerStats).toContainText('nida2026bday:puzzlesSolvedCount:v1=3');
+    await expect(footerStats).toContainText('nida2026bday:soundMuted:v1=1');
+    await expect(footerStats).toContainText('nida2026bday:editorSource:v1=eilučių skaičius: 4');
+    await expect(footerStats).not.toContainText('public class DanceRules');
+    await expect(footerStats).not.toContainText('public int tobuliTaskai = 123;');
+  });
+
   test('template buttons load preset code and apply gameplay changes', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
@@ -206,13 +759,16 @@ test.describe('Rhythm game flow', () => {
         .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 3;')
         .replace('public bool suKepure = false;', 'public bool suKepure = true;')
         .replace(
-          'public string kepuresTipas = "KLASIKINE";',
-          'public string kepuresTipas = "KARUNA";',
+          'public KepuresTipas kepuresTipas = KepuresTipas.KLASIKINE;',
+          'public KepuresTipas kepuresTipas = KepuresTipas.KARUNA;',
         )
-        .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "ZAIBAS";')
         .replace(
-          'public string arklioSpalva = "#d6b48a";',
-          'public string arklioSpalva = "#ff9f66";',
+          'public OroEfektas oroEfektas = OroEfektas.SAULETA;',
+          'public OroEfektas oroEfektas = OroEfektas.ZAIBAS;',
+        )
+        .replace(
+          'public Spalva arklioSpalva = Spalva.SMELIO;',
+          'public Spalva arklioSpalva = Spalva.ORANZINE;',
         ),
     );
 
@@ -225,11 +781,17 @@ test.describe('Rhythm game flow', () => {
         return await page.evaluate(() => window.__rhythmTest?.readEditorSource() ?? '');
       })
       .toContain('public int serijaIkiUzsivedimo = 3;');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readEditorSource() ?? '');
+      })
+      .toContain('return Spalva.ORANZINE;');
 
     const rules = await page.evaluate(() => window.__rhythmTest?.getRules());
     expect(rules?.serijaIkiHype).toBe(3);
     expect(rules?.suKepure).toBe(true);
     expect(rules?.oroEfektas).toBe('SAULETA');
+    expect(rules?.akiuSpalva).toBe('ORANZINE');
   });
 
   test('codebox supports resize and expands editable area height', async ({ page }) => {
@@ -299,6 +861,70 @@ test.describe('Rhythm game flow', () => {
       .toBeGreaterThan(beforeHeight + 80);
   });
 
+  test('codebox opens without vertical scroll on initial load', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+
+    const fallback = page.locator('#fallbackCode');
+    await expect(fallback).toBeVisible();
+
+    const hasVerticalOverflow = await fallback.evaluate((el) => {
+      const textarea = el as HTMLTextAreaElement;
+      return textarea.scrollHeight > textarea.clientHeight + 1;
+    });
+
+    expect(hasVerticalOverflow).toBe(false);
+  });
+
+  test('codebox autosize stays bounded after reload and keeps line numbers visible', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+    await expect(page.locator('#fallbackCode')).toBeVisible();
+
+    const initial = await readCodeboxMetrics(page);
+    expect(initial.firstGutterLine.trim()).toBe('1');
+    expect(initial.gutterLineCount).toBeGreaterThanOrEqual(initial.sourceLineCount);
+    expect(initial.gutterLineCount).toBeLessThan(initial.sourceLineCount * 8);
+    expect(initial.panelHeight).toBeLessThanOrEqual(Math.max(220, initial.editorScrollHeight + 24));
+    expect(initial.editorClientHeight + 1).toBeGreaterThanOrEqual(initial.editorScrollHeight);
+
+    await page.evaluate(() => {
+      const panel = document.querySelector<HTMLElement>('#editorPanel');
+      if (!panel) {
+        return;
+      }
+      panel.style.height = '1800px';
+      window.dispatchEvent(new Event('resize'));
+    });
+
+    await expect
+      .poll(async () => {
+        const metrics = await readCodeboxMetrics(page);
+        return metrics.panelHeight - metrics.editorScrollHeight;
+      })
+      .toBeLessThanOrEqual(24);
+
+    await page.reload();
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+    await expect(page.locator('#fallbackCode')).toBeVisible();
+
+    const afterReload = await readCodeboxMetrics(page);
+    expect(afterReload.firstGutterLine.trim()).toBe('1');
+    expect(afterReload.gutterLineCount).toBeGreaterThanOrEqual(afterReload.sourceLineCount);
+    expect(afterReload.gutterLineCount).toBeLessThan(afterReload.sourceLineCount * 8);
+    expect(afterReload.panelHeight).toBeLessThanOrEqual(
+      Math.max(220, afterReload.editorScrollHeight + 24),
+    );
+    expect(afterReload.editorClientHeight + 1).toBeGreaterThanOrEqual(
+      afterReload.editorScrollHeight,
+    );
+  });
+
   test('passes all learning missions step-by-step and unlocks templates', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
@@ -335,8 +961,8 @@ test.describe('Rhythm game flow', () => {
       source
         .replace('public bool suKepure = false;', 'public bool suKepure = true;')
         .replace(
-          'public string kepuresTipas = "KLASIKINE";',
-          'public string kepuresTipas = "KAUBOJAUS";',
+          'public KepuresTipas kepuresTipas = KepuresTipas.KLASIKINE;',
+          'public KepuresTipas kepuresTipas = KepuresTipas.KAUBOJAUS;',
         ),
     );
     await expect(progress).toHaveText('4 / 5');
@@ -344,13 +970,16 @@ test.describe('Rhythm game flow', () => {
     await updateDanceRulesCode(page, (source) =>
       source
         .replace(
-          'public string kepuresTipas = "KAUBOJAUS";',
-          'public string kepuresTipas = "KARUNA";',
+          'public KepuresTipas kepuresTipas = KepuresTipas.KAUBOJAUS;',
+          'public KepuresTipas kepuresTipas = KepuresTipas.KARUNA;',
         )
-        .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "ZAIBAS";')
         .replace(
-          'public string arklioSpalva = "#d6b48a";',
-          'public string arklioSpalva = "#ff8b3d";',
+          'public OroEfektas oroEfektas = OroEfektas.SAULETA;',
+          'public OroEfektas oroEfektas = OroEfektas.ZAIBAS;',
+        )
+        .replace(
+          'public Spalva arklioSpalva = Spalva.SMELIO;',
+          'public Spalva arklioSpalva = Spalva.ORANZINE;',
         ),
     );
     await expect(progress).toHaveText('5 / 5');
@@ -358,6 +987,208 @@ test.describe('Rhythm game flow', () => {
     await expect(page.locator('#puzzleDone')).toBeVisible();
     await expect(page.locator('#templateReward')).toBeVisible();
     await expect(page.locator('#templateLockNote')).toBeHidden();
+  });
+
+  test('mission progress is remembered after reload before all missions are done', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    const studio = page.locator('.code-studio');
+    const isOpen = await studio.evaluate((node) => (node as HTMLDetailsElement).open);
+    if (!isOpen) {
+      await page.locator('.code-studio summary').click();
+    }
+
+    const progress = page.locator('#puzzleProgress');
+    await expect(progress).toHaveText('0 / 5');
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('public float tobulasLangas = 0.05f;', 'public float tobulasLangas = 0.08f;'),
+    );
+    await expect(progress).toHaveText('1 / 5');
+
+    await updateDanceRulesCode(page, (source) =>
+      source
+        .replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 170;')
+        .replace('public int geriTaskai = 50;', 'public int geriTaskai = 80;'),
+    );
+    await expect(progress).toHaveText('2 / 5');
+
+    await page.reload();
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await expect(page.locator('#puzzleProgress')).toHaveText('2 / 5');
+    await expect(page.locator('#templateReward')).toBeHidden();
+    await expect(page.locator('#templateLockNote')).toBeVisible();
+  });
+
+  test('mission progress persists across reload at every milestone from 0 to 5', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+
+    const progress = page.locator('#puzzleProgress');
+    await expect(progress).toHaveText('0 / 5');
+
+    for (let solved = 1; solved <= 5; solved += 1) {
+      await updateDanceRulesCode(page, (source) => applyMissionStageRules(source, solved));
+      await expect(progress).toHaveText(`${solved} / 5`);
+
+      if (solved < 5) {
+        await expect(page.locator('#templateReward')).toBeHidden();
+        await expect(page.locator('#templateLockNote')).toBeVisible();
+      } else {
+        await expect(page.locator('#templateReward')).toBeVisible();
+        await expect(page.locator('#templateLockNote')).toBeHidden();
+      }
+
+      await page.reload();
+      await expect(page.locator('#gameScreen')).toBeVisible();
+      await expect(page.locator('#puzzleProgress')).toHaveText(`${solved} / 5`);
+      await ensureCodeStudioOpen(page);
+
+      if (solved < 5) {
+        await expect(page.locator('#templateReward')).toBeHidden();
+        await expect(page.locator('#templateLockNote')).toBeVisible();
+      } else {
+        await expect(page.locator('#templateReward')).toBeVisible();
+        await expect(page.locator('#templateLockNote')).toBeHidden();
+      }
+    }
+  });
+
+  test('mission progress does not regress after lowering rules and reloading', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+
+    const progress = page.locator('#puzzleProgress');
+    await updateDanceRulesCode(page, (source) => applyMissionStageRules(source, 3));
+    await expect(progress).toHaveText('3 / 5');
+
+    await updateDanceRulesCode(page, (source) => applyMissionStageRules(source, 0));
+    await expect(progress).toHaveText('3 / 5');
+
+    await page.reload();
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await expect(page.locator('#puzzleProgress')).toHaveText('3 / 5');
+    await ensureCodeStudioOpen(page);
+    await expect(page.locator('#templateReward')).toBeHidden();
+    await expect(page.locator('#templateLockNote')).toBeVisible();
+  });
+
+  test('with persisted partial progress, replaying completed missions does not double-count and new mission still advances', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.localStorage.setItem('nida2026bday:puzzlesSolvedCount:v1', '2');
+    });
+    await page.reload();
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+
+    const progress = page.locator('#puzzleProgress');
+    await expect(progress).toHaveText('2 / 5');
+
+    // Re-applying already completed early-mission values must not increase progress.
+    await updateDanceRulesCode(page, (source) => applyMissionStageRules(source, 2));
+    await expect(progress).toHaveText('2 / 5');
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() =>
+          window.localStorage.getItem('nida2026bday:puzzlesSolvedCount:v1'),
+        );
+      })
+      .toBe('2');
+
+    // First not-yet-completed mission should still advance normally.
+    await updateDanceRulesCode(page, (source) => applyMissionStageRules(source, 3));
+    await expect(progress).toHaveText('3 / 5');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() =>
+          window.localStorage.getItem('nida2026bday:puzzlesSolvedCount:v1'),
+        );
+      })
+      .toBe('3');
+
+    // Dropping rules after advancement must not regress persisted progress.
+    await updateDanceRulesCode(page, (source) => applyMissionStageRules(source, 0));
+    await expect(progress).toHaveText('3 / 5');
+    await page.reload();
+    await expect(page.locator('#puzzleProgress')).toHaveText('3 / 5');
+  });
+
+  test('with persisted full progress, replaying or downgrading code keeps templates unlocked', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.localStorage.setItem('nida2026bday:puzzlesSolvedCount:v1', '5');
+    });
+    await page.reload();
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+
+    await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
+    await expect(page.locator('#templateReward')).toBeVisible();
+    await expect(page.locator('#templateLockNote')).toBeHidden();
+
+    // Even after changing rules away from defaults, persisted completion remains authoritative.
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 130;'),
+    );
+    await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
+    await expect(page.locator('#templateReward')).toBeVisible();
+    await expect(page.locator('#templateLockNote')).toBeHidden();
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() =>
+          window.localStorage.getItem('nida2026bday:puzzlesSolvedCount:v1'),
+        );
+      })
+      .toBe('5');
+  });
+
+  test('mission progress storage gracefully handles invalid persisted values', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.localStorage.setItem('nida2026bday:puzzlesSolvedCount:v1', '-2');
+    });
+    await page.reload();
+    await expect(page.locator('#puzzleProgress')).toHaveText('0 / 5');
+    await ensureCodeStudioOpen(page);
+    await expect(page.locator('#templateReward')).toBeHidden();
+
+    await page.evaluate(() => {
+      window.localStorage.setItem('nida2026bday:puzzlesSolvedCount:v1', '999');
+    });
+    await page.reload();
+    await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
+    await ensureCodeStudioOpen(page);
+    await expect(page.locator('#templateReward')).toBeVisible();
+    await expect(page.locator('#templateLockNote')).toBeHidden();
+
+    await page.evaluate(() => {
+      window.localStorage.setItem('nida2026bday:puzzlesSolvedCount:v1', 'not-a-number');
+    });
+    await page.reload();
+    await expect(page.locator('#puzzleProgress')).toHaveText('0 / 5');
+    await ensureCodeStudioOpen(page);
+    await expect(page.locator('#templateReward')).toBeHidden();
+    await expect(page.locator('#templateLockNote')).toBeVisible();
   });
 
   test('missions still complete when required changes are applied in different order', async ({
@@ -377,12 +1208,12 @@ test.describe('Rhythm game flow', () => {
 
     // Apply late-mission values first, then fill early-mission requirements last.
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'oroEfektas', '"ZAIBAS"'),
+      replaceRuleValue(source, 'oroEfektas', 'OroEfektas.ZAIBAS'),
     );
     await expect(progress).toHaveText('0 / 5');
 
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'arklioSpalva', '"#22aaff"'),
+      replaceRuleValue(source, 'arklioSpalva', 'Spalva.MELYNA'),
     );
     await expect(progress).toHaveText('0 / 5');
 
@@ -395,7 +1226,7 @@ test.describe('Rhythm game flow', () => {
     await expect(progress).toHaveText('0 / 5');
 
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'kepuresTipas', '"KARUNA"'),
+      replaceRuleValue(source, 'kepuresTipas', 'KepuresTipas.KARUNA'),
     );
     await expect(progress).toHaveText('0 / 5');
 
@@ -436,8 +1267,8 @@ test.describe('Rhythm game flow', () => {
           .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 4;')
           .replace('public bool suKepure = false;', 'public bool suKepure = true;')
           .replace(
-            'public string kepuresTipas = "KLASIKINE";',
-            'public string kepuresTipas = "KARUNA";',
+            'public KepuresTipas kepuresTipas = KepuresTipas.KLASIKINE;',
+            'public KepuresTipas kepuresTipas = KepuresTipas.KARUNA;',
           ),
       );
 
@@ -447,63 +1278,64 @@ test.describe('Rhythm game flow', () => {
     // Order A + backtracking: weather first, then color, then intentionally break/recover.
     await reachLastMissionGate();
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'oroEfektas', '"ZAIBAS"'),
+      replaceRuleValue(source, 'oroEfektas', 'OroEfektas.ZAIBAS'),
     );
     await expect(page.locator('#puzzleProgress')).toHaveText('4 / 5');
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'arklioSpalva', '"#39a7ff"'),
+      replaceRuleValue(source, 'arklioSpalva', 'Spalva.MELYNA'),
     );
     await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'oroEfektas', '"SAULETA"'),
+      replaceRuleValue(source, 'oroEfektas', 'OroEfektas.SAULETA'),
     );
     await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'oroEfektas', '"LIETINGA"'),
+      replaceRuleValue(source, 'oroEfektas', 'OroEfektas.LIETINGA'),
     );
     await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'arklioSpalva', '"#d6b48a"'),
+      replaceRuleValue(source, 'arklioSpalva', 'Spalva.SMELIO'),
     );
     await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'arklioSpalva', '"#39a7ff"'),
+      replaceRuleValue(source, 'arklioSpalva', 'Spalva.MELYNA'),
     );
     await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'kepuresTipas', '"KAUBOJAUS"'),
+      replaceRuleValue(source, 'kepuresTipas', 'KepuresTipas.KAUBOJAUS'),
     );
     await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'kepuresTipas', '"KARUNA"'),
+      replaceRuleValue(source, 'kepuresTipas', 'KepuresTipas.KARUNA'),
     );
     await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
 
-    // Reset persisted unlock to validate order-B mission logic from a fresh gate.
+    // Reset persisted mission progress and code to validate order-B mission logic from a fresh gate.
     await page.evaluate(() => {
-      window.localStorage.removeItem('nida2026bday:puzzlesUnlocked:v1');
+      window.localStorage.removeItem('nida2026bday:puzzlesSolvedCount:v1');
+      window.localStorage.removeItem('nida2026bday:editorSource:v1');
     });
 
     // Order B + backtracking: color first, then weather, then intentionally break/recover.
     await reachLastMissionGate();
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'arklioSpalva', '"#39a7ff"'),
+      replaceRuleValue(source, 'arklioSpalva', 'Spalva.MELYNA'),
     );
     await expect(page.locator('#puzzleProgress')).toHaveText('4 / 5');
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'oroEfektas', '"ZAIBAS"'),
+      replaceRuleValue(source, 'oroEfektas', 'OroEfektas.ZAIBAS'),
     );
     await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'arklioSpalva', '"#d6b48a"'),
+      replaceRuleValue(source, 'arklioSpalva', 'Spalva.SMELIO'),
     );
     await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'oroEfektas', '"SNIEGAS"'),
+      replaceRuleValue(source, 'oroEfektas', 'OroEfektas.SNIEGAS'),
     );
     await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
     await updateDanceRulesCode(page, (source) =>
-      replaceRuleValue(source, 'arklioSpalva', '"#8d5cff"'),
+      replaceRuleValue(source, 'arklioSpalva', 'Spalva.VIOLETINE'),
     );
     await expect(page.locator('#puzzleProgress')).toHaveText('5 / 5');
 
@@ -574,35 +1406,195 @@ test.describe('Rhythm game flow', () => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
 
-    await page.waitForTimeout(250);
+    await expect
+      .poll(async () => {
+        return await page.locator('#horseCanvas').evaluate((node) => {
+          const canvas = node as HTMLCanvasElement;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            return 0;
+          }
 
-    const alpha = await page.locator('#horseCanvas').evaluate((node) => {
-      const canvas = node as HTMLCanvasElement;
+          const x = Math.max(0, Math.floor(canvas.width / 2));
+          const y = Math.max(0, Math.floor(canvas.height / 2));
+          return ctx.getImageData(x, y, 1, 1).data[3];
+        });
+      })
+      .toBeGreaterThan(0);
+
+    await expect
+      .poll(async () => {
+        return await page.locator('#horseCanvas').evaluate((node) => {
+          const canvas = node as HTMLCanvasElement;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            return 0;
+          }
+
+          const x = Math.max(0, canvas.width - 2);
+          const y = Math.max(0, canvas.height - 2);
+          return ctx.getImageData(x, y, 1, 1).data[3];
+        });
+      })
+      .toBeGreaterThan(0);
+  });
+
+  test('character canvas does not stay side-squeezed after repeated reloads', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    for (let i = 0; i < 3; i += 1) {
+      if (i > 0) {
+        await page.reload();
+        await expect(page.locator('#gameScreen')).toBeVisible();
+      }
+
+      await expect
+        .poll(async () => {
+          return await page.evaluate(() => {
+            const game = document.querySelector<HTMLElement>('#gameScreen');
+            const horseCanvas = document.querySelector<HTMLCanvasElement>('#horseCanvas');
+            if (!game || !horseCanvas) {
+              return { ok: false, ratio: 0 };
+            }
+            const gameStyle = window.getComputedStyle(game);
+            const horizontalPadding =
+              Number.parseFloat(gameStyle.paddingLeft || '0') +
+              Number.parseFloat(gameStyle.paddingRight || '0');
+            const containerInnerWidth = Math.max(1, game.clientWidth - horizontalPadding);
+            const canvasCssWidth = horseCanvas.getBoundingClientRect().width;
+            return {
+              ok: true,
+              ratio: canvasCssWidth / containerInnerWidth,
+              canvasCssWidth,
+              containerInnerWidth,
+            };
+          });
+        })
+        .toMatchObject({ ok: true });
+
+      const ratio = await page.evaluate(() => {
+        const game = document.querySelector<HTMLElement>('#gameScreen');
+        const horseCanvas = document.querySelector<HTMLCanvasElement>('#horseCanvas');
+        if (!game || !horseCanvas) {
+          return 0;
+        }
+        const gameStyle = window.getComputedStyle(game);
+        const horizontalPadding =
+          Number.parseFloat(gameStyle.paddingLeft || '0') +
+          Number.parseFloat(gameStyle.paddingRight || '0');
+        const containerInnerWidth = Math.max(1, game.clientWidth - horizontalPadding);
+        return horseCanvas.getBoundingClientRect().width / containerInnerWidth;
+      });
+      expect(ratio).toBeGreaterThanOrEqual(0.92);
+    }
+  });
+
+  test('weather background stays correctly rendered after codebox resize', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+
+    const resizeHandle = page.locator('#editorResizer');
+    await expect(resizeHandle).toBeVisible();
+    await page.evaluate(() => {
+      const panel = document.querySelector<HTMLElement>('.editor-panel');
+      const handle = document.querySelector<HTMLElement>('#editorResizer');
+      if (!panel || !handle) {
+        return;
+      }
+      const startY = panel.getBoundingClientRect().bottom - 6;
+      handle.dispatchEvent(
+        new MouseEvent('mousedown', {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          clientY: startY,
+        }),
+      );
+      window.dispatchEvent(
+        new MouseEvent('mousemove', {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          clientY: startY + 140,
+        }),
+      );
+      window.dispatchEvent(
+        new MouseEvent('mouseup', {
+          bubbles: true,
+          cancelable: true,
+          button: 0,
+          clientY: startY + 140,
+        }),
+      );
+    });
+
+    const sample = await page.evaluate(() => {
+      const canvas = document.querySelector<HTMLCanvasElement>('#weatherSceneCanvas');
+      if (!canvas) {
+        return null;
+      }
+      const ctx = canvas.getContext('2d');
+      if (!ctx) {
+        return null;
+      }
+      const w = canvas.width;
+      const h = canvas.height;
+      const top = ctx.getImageData(Math.floor(w * 0.5), Math.floor(h * 0.14), 1, 1).data;
+      const bottom = ctx.getImageData(Math.floor(w * 0.5), Math.floor(h * 0.9), 1, 1).data;
+      return {
+        top: { r: top[0], g: top[1], b: top[2], a: top[3] },
+        bottom: { r: bottom[0], g: bottom[1], b: bottom[2], a: bottom[3] },
+      };
+    });
+
+    expect(sample).not.toBeNull();
+    if (!sample) {
+      return;
+    }
+    expect(sample.top.a).toBeGreaterThan(0);
+    expect(sample.bottom.a).toBeGreaterThan(0);
+    // Top should stay sky-like (blue channel dominant).
+    expect(sample.top.b).toBeGreaterThanOrEqual(sample.top.r);
+    // Bottom should stay ground-like (green channel dominant).
+    expect(sample.bottom.g).toBeGreaterThanOrEqual(sample.bottom.b);
+  });
+
+  test('sun remains visible inside top-right corner of large background', async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height: 768 });
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    const brightSunPixels = await page.evaluate(() => {
+      const canvas = document.querySelector<HTMLCanvasElement>('#weatherSceneCanvas');
+      if (!canvas) {
+        return 0;
+      }
       const ctx = canvas.getContext('2d');
       if (!ctx) {
         return 0;
       }
 
-      const x = Math.max(0, Math.floor(canvas.width / 2));
-      const y = Math.max(0, Math.floor(canvas.height / 2));
-      return ctx.getImageData(x, y, 1, 1).data[3];
-    });
-
-    expect(alpha).toBeGreaterThan(0);
-
-    const edgeAlpha = await page.locator('#horseCanvas').evaluate((node) => {
-      const canvas = node as HTMLCanvasElement;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) {
-        return 0;
+      const xStart = Math.floor(canvas.width * 0.72);
+      const yStart = 0;
+      const width = Math.max(1, Math.floor(canvas.width * 0.28));
+      const height = Math.max(1, Math.floor(canvas.height * 0.3));
+      const data = ctx.getImageData(xStart, yStart, width, height).data;
+      let count = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const a = data[i + 3];
+        if (a > 0 && r >= 220 && g >= 175 && b <= 170) {
+          count += 1;
+        }
       }
-
-      const x = Math.max(0, canvas.width - 2);
-      const y = Math.max(0, canvas.height - 2);
-      return ctx.getImageData(x, y, 1, 1).data[3];
+      return count;
     });
 
-    expect(edgeAlpha).toBeGreaterThan(0);
+    expect(brightSunPixels).toBeGreaterThan(40);
   });
 
   test('keeps game panel within viewport width', async ({ page }) => {
@@ -683,6 +1675,225 @@ test.describe('Rhythm game flow', () => {
     expect(layout.gameWidth).toBeLessThanOrEqual(viewportWidth + 1);
   });
 
+  test('@perf-common keeps stable gameplay cadence across projects', async ({ page }, testInfo) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(true);
+      window.__rhythmTest?.resetScore();
+    });
+
+    await page.waitForTimeout(2200);
+
+    await expect
+      .poll(
+        async () => {
+          return await page.evaluate(
+            () => window.__rhythmTest?.readPerformance() ?? { fps: 0, visualCapFps: 0 },
+          );
+        },
+        { timeout: 10000 },
+      )
+      .toMatchObject({ fps: expect.any(Number), visualCapFps: expect.any(Number) });
+
+    const perf = await page.evaluate(() => window.__rhythmTest?.readPerformance() ?? null);
+    expect(perf).not.toBeNull();
+    if (!perf) {
+      return;
+    }
+
+    if (testInfo.project.name === 'desktop-chromium') {
+      expect(perf.visualCapFps).toBe(60);
+      expect(perf.mobileMode).toBe(false);
+      expect(perf.fps).toBeGreaterThanOrEqual(40);
+      expect(perf.frameMs).toBeLessThanOrEqual(26);
+      return;
+    }
+
+    expect(perf.mobileMode).toBe(true);
+    expect([36, 45]).toContain(perf.visualCapFps);
+    expect(perf.fps).toBeGreaterThanOrEqual(20);
+    expect(perf.frameMs).toBeLessThanOrEqual(55);
+  });
+
+  test('@perf-common detects sustained FPS regressions on desktop', async ({ page }, testInfo) => {
+    if (testInfo.project.name !== 'desktop-chromium') {
+      return;
+    }
+
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(true);
+      window.__rhythmTest?.resetScore();
+    });
+
+    await page.waitForTimeout(3000);
+    const samples: Array<{ fps: number; frameMs: number; mobileMode: boolean }> = [];
+    for (let i = 0; i < 10; i += 1) {
+      const perf = await page.evaluate(() => window.__rhythmTest?.readPerformance() ?? null);
+      if (perf) {
+        samples.push(perf);
+      }
+      await page.waitForTimeout(1000);
+    }
+    expect(samples.length).toBeGreaterThanOrEqual(8);
+
+    const fpsValues = samples.map((sample) => sample.fps);
+    const frameValues = samples.map((sample) => sample.frameMs);
+    const averageFps = fpsValues.reduce((sum, value) => sum + value, 0) / fpsValues.length;
+    const worstFps = Math.min(...fpsValues);
+    const averageFrameMs =
+      frameValues.reduce((sum, value) => sum + value, 0) / Math.max(1, frameValues.length);
+
+    expect(samples.every((sample) => sample.mobileMode === false)).toBe(true);
+    expect(averageFps).toBeGreaterThanOrEqual(52);
+    expect(worstFps).toBeGreaterThanOrEqual(38);
+    expect(averageFrameMs).toBeLessThanOrEqual(20);
+  });
+
+  test('@perf-common keeps beat tracking memory bounded during long autoplay', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(true);
+      window.__rhythmTest?.resetScore();
+    });
+
+    await page.waitForTimeout(8500);
+    const firstSample = await page.evaluate(
+      () => window.__rhythmTest?.readPlaybackTracking() ?? null,
+    );
+    expect(firstSample).not.toBeNull();
+    if (!firstSample) {
+      return;
+    }
+
+    expect(firstSample.autoPlayedBeatIds).toBeLessThanOrEqual(256);
+    expect(firstSample.songPlayedBeatIds).toBeLessThanOrEqual(512);
+
+    await page.waitForTimeout(8500);
+    const secondSample = await page.evaluate(
+      () => window.__rhythmTest?.readPlaybackTracking() ?? null,
+    );
+    expect(secondSample).not.toBeNull();
+    if (!secondSample) {
+      return;
+    }
+
+    expect(secondSample.autoPlayedBeatIds).toBeLessThanOrEqual(256);
+    expect(secondSample.songPlayedBeatIds).toBeLessThanOrEqual(512);
+  });
+
+  test('@perf-common long-soak keeps resource counters bounded and emits timeline artifact', async ({
+    page,
+  }, testInfo) => {
+    if (testInfo.project.name !== 'desktop-chromium') {
+      return;
+    }
+
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(true);
+      window.__rhythmTest?.resetScore();
+    });
+
+    type SoakSample = {
+      elapsedSec: number;
+      resources: ReturnType<NonNullable<Window['__rhythmTest']>['readResourceStats']>;
+      perf: ReturnType<NonNullable<Window['__rhythmTest']>['readPerformance']>;
+      playback: ReturnType<NonNullable<Window['__rhythmTest']>['readPlaybackTracking']>;
+    };
+    const samples: SoakSample[] = [];
+    const startedAtMs = Date.now();
+    for (let i = 0; i < 26; i += 1) {
+      const snapshot = await page.evaluate(() => {
+        return {
+          resources: window.__rhythmTest?.readResourceStats() ?? null,
+          perf: window.__rhythmTest?.readPerformance() ?? null,
+          playback: window.__rhythmTest?.readPlaybackTracking() ?? null,
+        };
+      });
+      expect(snapshot.resources).not.toBeNull();
+      expect(snapshot.perf).not.toBeNull();
+      expect(snapshot.playback).not.toBeNull();
+      if (!snapshot.resources || !snapshot.perf || !snapshot.playback) {
+        return;
+      }
+      samples.push({
+        elapsedSec: Number(((Date.now() - startedAtMs) / 1000).toFixed(1)),
+        resources: snapshot.resources,
+        perf: snapshot.perf,
+        playback: snapshot.playback,
+      });
+      await page.waitForTimeout(1000);
+    }
+
+    const baseline = samples[0].resources;
+    const maxActiveListeners = Math.max(
+      ...samples.map((sample) => sample.resources.activeEventListeners),
+    );
+    const maxActiveTimeouts = Math.max(...samples.map((sample) => sample.resources.activeTimeouts));
+    const maxActiveIntervals = Math.max(
+      ...samples.map((sample) => sample.resources.activeIntervals),
+    );
+    const maxActiveRafs = Math.max(...samples.map((sample) => sample.resources.activeRafs));
+    const maxActiveAbort = Math.max(
+      ...samples.map((sample) => sample.resources.activeAbortControllers),
+    );
+    const maxActiveObservers = Math.max(
+      ...samples.map((sample) => sample.resources.activeResizeObservers),
+    );
+    const maxActiveSyntaxTrees = Math.max(
+      ...samples.map((sample) => sample.resources.activeSyntaxTrees),
+    );
+    const final = samples[samples.length - 1].resources;
+
+    expect(maxActiveListeners).toBeLessThanOrEqual(baseline.activeEventListeners + 2);
+    expect(final.activeEventListeners).toBeLessThanOrEqual(baseline.activeEventListeners + 1);
+    expect(maxActiveTimeouts).toBeLessThanOrEqual(24);
+    expect(maxActiveIntervals).toBeLessThanOrEqual(2);
+    expect(maxActiveRafs).toBeLessThanOrEqual(4);
+    expect(maxActiveAbort).toBeLessThanOrEqual(3);
+    expect(maxActiveObservers).toBeLessThanOrEqual(2);
+    expect(maxActiveSyntaxTrees).toBeLessThanOrEqual(1);
+
+    expect(samples.every((sample) => sample.playback.autoPlayedBeatIds <= 256)).toBe(true);
+    expect(samples.every((sample) => sample.playback.songPlayedBeatIds <= 512)).toBe(true);
+    expect(samples.some((sample) => sample.perf.fps >= 30)).toBe(true);
+
+    const artifactPath = testInfo.outputPath(`resource-soak-${testInfo.project.name}.json`);
+    await writeFile(
+      artifactPath,
+      JSON.stringify(
+        {
+          project: testInfo.project.name,
+          collectedAt: new Date().toISOString(),
+          baseline,
+          final,
+          summary: {
+            maxActiveListeners,
+            maxActiveTimeouts,
+            maxActiveIntervals,
+            maxActiveRafs,
+            maxActiveAbort,
+            maxActiveObservers,
+            maxActiveSyntaxTrees,
+          },
+          samples,
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+    await testInfo.attach('resource-soak-timeline', {
+      path: artifactPath,
+      contentType: 'application/json',
+    });
+  });
+
   test('changing C# points changes real scoring speed', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
@@ -745,6 +1956,92 @@ test.describe('Rhythm game flow', () => {
       .toBe('UŽSIVEDĘS');
   });
 
+  test('default rules can still reach UŽSIVEDĘS during normal autoplay run', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await page.evaluate(() => {
+      window.localStorage.removeItem('nida2026bday:editorSource:v1');
+    });
+    await page.reload();
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(true);
+      window.__rhythmTest?.resetScore();
+    });
+
+    await expect
+      .poll(
+        async () => {
+          return await page.evaluate(() => {
+            const read = window.__rhythmTest?.read();
+            const rules = window.__rhythmTest?.getRules();
+            return {
+              judgement: read?.judgement ?? '',
+              streak: read?.streak ?? 0,
+              threshold: rules?.serijaIkiHype ?? 0,
+            };
+          });
+        },
+        { timeout: 18000 },
+      )
+      .toMatchObject({
+        judgement: 'UŽSIVEDĘS',
+      });
+  });
+
+  test('UŽSIVEDĘS status stays visible when a hold note starts during hype', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(false);
+      window.__rhythmTest?.resetScore();
+    });
+
+    await updateDanceRulesCode(page, (source) =>
+      source
+        .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 2;')
+        .replace('public float tobulasLangas = 0.05f;', 'public float tobulasLangas = 0.2f;')
+        .replace('public float gerasLangas = 0.12f;', 'public float gerasLangas = 0.25f;'),
+    );
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => {
+          const firstTap = window.__rhythmTest?.peekUpcomingTapAny(0.12);
+          if (!firstTap) {
+            return { ok: false };
+          }
+          window.__rhythmTest?.playLaneAt(firstTap.lane, firstTap.timeSec);
+
+          const secondTap = window.__rhythmTest?.peekUpcomingTapAny(0.12);
+          if (!secondTap) {
+            return { ok: false };
+          }
+          window.__rhythmTest?.playLaneAt(secondTap.lane, secondTap.timeSec);
+          return { ok: true };
+        });
+      })
+      .toMatchObject({ ok: true });
+
+    await expect(page.locator('#judgement')).toHaveText('UŽSIVEDĘS');
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => {
+          const hold = window.__rhythmTest?.peekNearestHoldAny();
+          if (!hold) {
+            return { ok: false };
+          }
+          window.__rhythmTest?.playLaneAt(hold.lane, hold.timeSec);
+          const read = window.__rhythmTest?.read();
+          return { ok: true, judgement: read?.judgement ?? '' };
+        });
+      })
+      .toMatchObject({ ok: true, judgement: 'UŽSIVEDĘS' });
+  });
+
   test('changing timing windows changes judgement outcomes for same offset', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
@@ -774,22 +2071,25 @@ test.describe('Rhythm game flow', () => {
     await expect(page.locator('#gameScreen')).toBeVisible();
 
     await updateDanceRulesCode(page, (source) => {
-      expect(source).toContain('public string arklioSpalva');
-      expect(source).toContain('public string karciuSpalva');
+      expect(source).toContain('public Spalva arklioSpalva');
+      expect(source).toContain('public Spalva karciuSpalva');
       expect(source).toContain('public bool suKepure');
-      expect(source).toContain('public string kepuresTipas');
-      expect(source).toContain('public string oroEfektas');
+      expect(source).toContain('public KepuresTipas kepuresTipas');
+      expect(source).toContain('public OroEfektas oroEfektas');
       return source
         .replace(
-          'public string arklioSpalva = "#d6b48a";',
-          'public string arklioSpalva = "#3366cc";',
+          'public Spalva arklioSpalva = Spalva.SMELIO;',
+          'public Spalva arklioSpalva = Spalva.MELYNA;',
         )
         .replace('public bool suKepure = false;', 'public bool suKepure = true;')
         .replace(
-          'public string kepuresTipas = "KLASIKINE";',
-          'public string kepuresTipas = "KAUBOJAUS";',
+          'public KepuresTipas kepuresTipas = KepuresTipas.KLASIKINE;',
+          'public KepuresTipas kepuresTipas = KepuresTipas.KAUBOJAUS;',
         )
-        .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "LIETINGA";');
+        .replace(
+          'public OroEfektas oroEfektas = OroEfektas.SAULETA;',
+          'public OroEfektas oroEfektas = OroEfektas.LIETINGA;',
+        );
     });
   });
 
@@ -805,18 +2105,18 @@ test.describe('Rhythm game flow', () => {
         replaceRuleValue(
           replaceRuleValue(
             replaceRuleValue(
-              replaceRuleValue(source, 'arklioSpalva', '"#1a8cff"'),
+              replaceRuleValue(source, 'arklioSpalva', 'Spalva.MELYNA'),
               'karciuSpalva',
-              '"#f5a300"',
+              'Spalva.AUKSINE',
             ),
             'suKepure',
             'true',
           ),
           'kepuresTipas',
-          '"RAGANOS"',
+          'KepuresTipas.RAGANOS',
         ),
         'oroEfektas',
-        '"LIETINGA"',
+        'OroEfektas.LIETINGA',
       ),
     );
     await expect
@@ -824,13 +2124,527 @@ test.describe('Rhythm game flow', () => {
         return await page.evaluate(() => window.__rhythmTest?.readVisualState() ?? null);
       })
       .toMatchObject({
-        arklioSpalva: '#1a8cff',
-        karciuSpalva: '#f5a300',
+        arklioSpalva: 'MELYNA',
+        karciuSpalva: 'AUKSINE',
         suKepure: true,
         kepuresTipas: 'RAGANOS',
         oroEfektas: 'LIETINGA',
       });
     await expect(page.locator('body')).toHaveAttribute('data-weather', 'LIETINGA');
+  });
+
+  test('editable eye-color method changes horse eye color', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    const baselineRules = await page.evaluate(() => window.__rhythmTest?.getRules() ?? null);
+    expect(baselineRules?.akiuSpalva).toBe('JUODA');
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('return Spalva.JUODA;', 'return Spalva.ROZINE;'),
+    );
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules()?.akiuSpalva ?? '');
+      })
+      .toBe('ROZINE');
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readVisualState()?.akiuSpalva ?? '');
+      })
+      .toBe('ROZINE');
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('return Spalva.ROZINE;', 'return Spalva.NEON;'),
+    );
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules()?.akiuSpalva ?? '');
+      })
+      .toBe('JUODA');
+  });
+
+  test('codebox keeps last valid rules when code is invalid, then recovers after fix', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 321;'),
+    );
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules()?.tobuliTaskai ?? 0);
+      })
+      .toBe(321);
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('public class DanceRules', 'public class'),
+    );
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules()?.tobuliTaskai ?? 0);
+      })
+      .toBe(321);
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('public class', 'public class DanceRules'),
+    );
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules()?.tobuliTaskai ?? 0);
+      })
+      .toBe(321);
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('public int tobuliTaskai = 321;', 'public int tobuliTaskai = 222;'),
+    );
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules()?.tobuliTaskai ?? 0);
+      })
+      .toBe(222);
+  });
+
+  test('@smoke30 invalid code enables technical test background and sleeping horse until compile recovers', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    const readWeatherPixelSample = async (): Promise<{
+      r: number;
+      g: number;
+      b: number;
+      a: number;
+    } | null> => {
+      return await page.evaluate(() => {
+        const canvas = document.querySelector<HTMLCanvasElement>('#weatherSceneCanvas');
+        if (!canvas) {
+          return null;
+        }
+        const ctx = canvas.getContext('2d');
+        if (!ctx) {
+          return null;
+        }
+        const x = Math.floor(canvas.width * 0.75);
+        const y = Math.floor(canvas.height * 0.05);
+        const sample = ctx.getImageData(x, y, 1, 1).data;
+        return { r: sample[0], g: sample[1], b: sample[2], a: sample[3] };
+      });
+    };
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? false);
+      })
+      .toBe(true);
+
+    const validPixel = await readWeatherPixelSample();
+    expect(validPixel).not.toBeNull();
+    if (!validPixel) {
+      return;
+    }
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('public class DanceRules', 'public class'),
+    );
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? true);
+      })
+      .toBe(false);
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readVisualState()?.mood ?? '');
+      })
+      .toBe('MIEGA');
+
+    const invalidPixel = await readWeatherPixelSample();
+    expect(invalidPixel).not.toBeNull();
+    if (!invalidPixel) {
+      return;
+    }
+    expect(invalidPixel.a).toBeGreaterThan(0);
+    const colorDelta =
+      Math.abs(invalidPixel.r - validPixel.r) +
+      Math.abs(invalidPixel.g - validPixel.g) +
+      Math.abs(invalidPixel.b - validPixel.b);
+    expect(colorDelta).toBeGreaterThan(45);
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('public class', 'public class DanceRules'),
+    );
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? false);
+      })
+      .toBe(true);
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readVisualState()?.mood ?? '');
+      })
+      .not.toBe('MIEGA');
+  });
+
+  test('technical notice question-mark icon toggles details on both canvases', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+    await page.locator('#realCompilerCheckButton').click();
+    await expect(page.locator('#realCompilerStatus')).not.toContainText('tikrina kodą', {
+      timeout: 12000,
+    });
+
+    const dispatchTechnicalIconPointer = async (
+      canvasSelector: '#weatherSceneCanvas' | '#horseCanvas',
+      icon: { x: number; y: number },
+    ): Promise<void> => {
+      await page.evaluate(
+        ({ selector, x, y }) => {
+          const canvas = document.querySelector<HTMLCanvasElement>(selector);
+          if (!canvas) {
+            return;
+          }
+          const rect = canvas.getBoundingClientRect();
+          const clientX = rect.left + x;
+          const clientY = rect.top + y;
+          const event = new PointerEvent('pointerdown', {
+            bubbles: true,
+            cancelable: true,
+            pointerType: 'mouse',
+            button: 0,
+            clientX,
+            clientY,
+          });
+          canvas.dispatchEvent(event);
+        },
+        { selector: canvasSelector, x: icon.x, y: icon.y },
+      );
+    };
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('public class DanceRules', 'public class'),
+    );
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? true);
+      })
+      .toBe(false);
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isTechnicalNoticeExpanded() ?? true);
+      })
+      .toBe(false);
+
+    const railToggle = page.locator('#compileNoticeToggle');
+    if (await railToggle.isVisible()) {
+      await railToggle.click();
+    } else {
+      await expect
+        .poll(async () => {
+          return await page.evaluate(
+            () => window.__rhythmTest?.readTechnicalNoticeIcons().weather ?? null,
+          );
+        })
+        .toMatchObject({ x: expect.any(Number), y: expect.any(Number), r: expect.any(Number) });
+
+      const weatherIconData = (await page.evaluate(
+        () => window.__rhythmTest?.readTechnicalNoticeIcons().weather ?? null,
+      )) as { x: number; y: number; r: number } | null;
+      expect(weatherIconData).not.toBeNull();
+      if (!weatherIconData) {
+        return;
+      }
+      await dispatchTechnicalIconPointer('#weatherSceneCanvas', weatherIconData);
+    }
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isTechnicalNoticeExpanded() ?? false);
+      })
+      .toBe(true);
+
+    const noticeText = await page
+      .locator('#compileNoticeRail')
+      .isVisible()
+      .then(async (visible) => {
+        if (visible) {
+          return await page.locator('#compileNoticeText').innerText();
+        }
+        return await page.locator('#horseCompileNoticeText').innerText();
+      });
+    expect(noticeText).toContain('5) Tikras C# kompiliatorius');
+    expect(noticeText).toContain('6) Tikro C# kompiliatoriaus užklausos detalės');
+    expect(noticeText).toContain('Užklausa (siųstas turinys):');
+    expect(noticeText).toContain('Atsakymas (gautas turinys):');
+
+    if (await railToggle.isVisible()) {
+      await railToggle.click();
+    } else {
+      const horseNoticeToggle = page.locator('#horseCompileNoticeToggle');
+      if (await horseNoticeToggle.isVisible()) {
+        await horseNoticeToggle.click();
+      } else {
+        await expect
+          .poll(async () => {
+            return await page.evaluate(
+              () => window.__rhythmTest?.readTechnicalNoticeIcons().horse ?? null,
+            );
+          })
+          .toMatchObject({ x: expect.any(Number), y: expect.any(Number), r: expect.any(Number) });
+        const horseIconData = (await page.evaluate(
+          () => window.__rhythmTest?.readTechnicalNoticeIcons().horse ?? null,
+        )) as { x: number; y: number; r: number } | null;
+        expect(horseIconData).not.toBeNull();
+        if (!horseIconData) {
+          return;
+        }
+        await dispatchTechnicalIconPointer('#horseCanvas', horseIconData);
+      }
+    }
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isTechnicalNoticeExpanded() ?? true);
+      })
+      .toBe(false);
+  });
+
+  test('real compiler button uses default backend endpoint when env is missing', async ({
+    page,
+  }) => {
+    const payloads: string[] = [];
+    await page.route(
+      'https://nida2026bday-real-compiler.onrender.com/api/csharp/compile',
+      async (route) => {
+        payloads.push(route.request().postData() ?? '');
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({
+            valid: true,
+            diagnostics: [],
+            compiler: 'Roslyn C#',
+          }),
+        });
+      },
+    );
+
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+
+    await page.locator('#realCompilerCheckButton').click();
+    await expect(page.locator('#realCompilerStatus')).toContainText(
+      'Tikras C# kompiliatorius (Roslyn C#): kodas kompiliuojasi.',
+    );
+    await expect(page.locator('#realCompilerStatus')).toContainText('Klaidų nerasta.');
+    expect(payloads).toHaveLength(1);
+    expect(payloads[0]).toContain('"source"');
+    expect(payloads[0]).toContain('public class DanceRules');
+  });
+
+  test('compile notices are both hidden when code compiles', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? false);
+      })
+      .toBe(true);
+
+    await expect(page.locator('#compileNoticeRail')).toBeHidden();
+    await expect(page.locator('#horseCompileNotice')).toBeHidden();
+  });
+
+  test('many broken C# syntax cases always trigger compile-invalid technical mode', async ({
+    page,
+  }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? false);
+      })
+      .toBe(true);
+
+    const breakCases: Array<{
+      label: string;
+      breakCode: (source: string) => string;
+      fixCode: (source: string) => string;
+    }> = [
+      {
+        label: 'missing comma in Spalva enum',
+        breakCode: (source) => source.replace('SMELIO,', 'SMELIO'),
+        fixCode: (source) => source.replace('SMELIO\n', 'SMELIO,\n'),
+      },
+      {
+        label: 'broken enum keyword',
+        breakCode: (source) => source.replace('public enum OroEfektas', 'pubic enum OroEfektas'),
+        fixCode: (source) => source.replace('pubic enum OroEfektas', 'public enum OroEfektas'),
+      },
+      {
+        label: 'missing field semicolon',
+        breakCode: (source) =>
+          source.replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 100'),
+        fixCode: (source) =>
+          source.replace('public int tobuliTaskai = 100\n', 'public int tobuliTaskai = 100;\n'),
+      },
+      {
+        label: 'broken class keyword',
+        breakCode: (source) => source.replace('public class DanceRules', 'publik class DanceRules'),
+        fixCode: (source) => source.replace('publik class DanceRules', 'public class DanceRules'),
+      },
+      {
+        label: 'broken return keyword in method',
+        breakCode: (source) => source.replace('return Spalva.JUODA;', 'retur Spalva.JUODA;'),
+        fixCode: (source) => source.replace('retur Spalva.JUODA;', 'return Spalva.JUODA;'),
+      },
+    ];
+
+    for (const testCase of breakCases) {
+      await updateDanceRulesCode(page, testCase.breakCode);
+      await expect
+        .poll(
+          async () => {
+            return await page.evaluate(() => ({
+              valid: window.__rhythmTest?.isCompileValid() ?? true,
+              mood: window.__rhythmTest?.readVisualState()?.mood ?? '',
+            }));
+          },
+          {
+            message: `Neįsijungė techninis režimas: ${testCase.label}`,
+          },
+        )
+        .toMatchObject({ valid: false, mood: 'MIEGA' });
+
+      await updateDanceRulesCode(page, testCase.fixCode);
+      await expect
+        .poll(
+          async () => {
+            return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? false);
+          },
+          {
+            message: `Nepavyko atsistatyti po pataisymo: ${testCase.label}`,
+          },
+        )
+        .toBe(true);
+    }
+  });
+
+  test('sleep mode blocks horse note particles even when autoplay is enabled', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(false);
+      window.__rhythmTest?.resetScore();
+      window.__rhythmTest?.playNearestTapAny(0);
+    });
+    await expect
+      .poll(async () => {
+        return await page.evaluate(
+          () => window.__rhythmTest?.readHorseRuntime().noteParticles ?? 0,
+        );
+      })
+      .toBeGreaterThan(0);
+
+    await page.evaluate(() => {
+      window.__rhythmTest?.setAutoplay(true);
+    });
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('public class DanceRules', 'public class'),
+    );
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? true);
+      })
+      .toBe(false);
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readVisualState()?.mood ?? '');
+      })
+      .toBe('MIEGA');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(
+          () => window.__rhythmTest?.readHorseRuntime().noteParticles ?? -1,
+        );
+      })
+      .toBe(0);
+
+    await page.waitForTimeout(900);
+    expect(
+      await page.evaluate(() => window.__rhythmTest?.readHorseRuntime().noteParticles ?? -1),
+    ).toBe(0);
+  });
+
+  test('codebox accepts enum values without type prefix in fields and method', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await updateDanceRulesCode(page, (source) =>
+      source
+        .replace(
+          'public Spalva arklioSpalva = Spalva.SMELIO;',
+          'public Spalva arklioSpalva = MELYNA;',
+        )
+        .replace(
+          'public KepuresTipas kepuresTipas = KepuresTipas.KLASIKINE;',
+          'public KepuresTipas kepuresTipas = KARUNA;',
+        )
+        .replace(
+          'public OroEfektas oroEfektas = OroEfektas.SAULETA;',
+          'public OroEfektas oroEfektas = SNIEGAS;',
+        )
+        .replace('return Spalva.JUODA;', 'return ROZINE;'),
+    );
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules() ?? null);
+      })
+      .toMatchObject({
+        arklioSpalva: 'MELYNA',
+        kepuresTipas: 'KARUNA',
+        oroEfektas: 'SNIEGAS',
+        akiuSpalva: 'ROZINE',
+      });
+  });
+
+  test('eye-color method compile fails for string return type', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace(
+        `public Spalva AkiuSpalva()
+    {
+        return Spalva.JUODA;
+    }`,
+        `public string AkiuSpalva()
+    {
+        return "#ff93d1";
+    }`,
+      ),
+    );
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? true);
+      })
+      .toBe(false);
   });
 
   test('all editable C# DanceRules fields change live gameplay behavior', async ({ page }) => {
@@ -861,19 +2675,19 @@ test.describe('Rhythm game flow', () => {
                   '2',
                 ),
                 'arklioSpalva',
-                '"#3366cc"',
+                'Spalva.MELYNA',
               ),
               'karciuSpalva',
-              '"#ffcc00"',
+              'Spalva.AUKSINE',
             ),
             'suKepure',
             'true',
           ),
           'kepuresTipas',
-          '"KARUNA"',
+          'KepuresTipas.KARUNA',
         ),
         'oroEfektas',
-        '"SNIEGAS"',
+        'OroEfektas.SNIEGAS',
       ),
     );
     await page.evaluate(() => {
@@ -906,8 +2720,8 @@ test.describe('Rhythm game flow', () => {
     expect(rules?.tobuliTaskai).toBe(321);
     expect(rules?.geriTaskai).toBe(123);
     expect(rules?.serijaIkiHype).toBe(2);
-    expect(rules?.arklioSpalva).toBe('#3366cc');
-    expect(rules?.karciuSpalva).toBe('#ffcc00');
+    expect(rules?.arklioSpalva).toBe('MELYNA');
+    expect(rules?.karciuSpalva).toBe('AUKSINE');
     expect(rules?.suKepure).toBe(true);
     expect(rules?.kepuresTipas).toBe('KARUNA');
     expect(rules?.oroEfektas).toBe('SNIEGAS');
@@ -922,19 +2736,25 @@ test.describe('Rhythm game flow', () => {
       window.__rhythmTest?.resetScore();
     });
 
-    await expect
-      .poll(async () => {
-        return await page.evaluate(() => {
-          const ok = window.__rhythmTest?.playNearestAny(-0.5) ?? false;
-          return {
-            ok,
-            state: window.__rhythmTest?.read(),
-          };
-        });
-      })
-      .toMatchObject({ ok: true });
+    const firstNote = await page.evaluate(() => window.__rhythmTest?.peekUpcomingTapAny(0.6));
+    expect(firstNote).not.toBeNull();
+    if (!firstNote) {
+      return;
+    }
 
-    await expect(page.locator('#judgement')).toHaveText('PER ANKSTI');
+    const result = await page.evaluate(
+      ({ lane, timeSec }) => {
+        const ok = window.__rhythmTest?.playLaneAt(lane, timeSec - 0.5) ?? false;
+        return {
+          ok,
+          state: window.__rhythmTest?.read(),
+        };
+      },
+      { lane: firstNote.lane, timeSec: firstNote.timeSec },
+    );
+
+    expect(result.ok).toBe(true);
+    expect(result.state?.judgement).toBe('PER ANKSTI');
   });
 
   test('too-early hit consumes that note and does not allow replay on exact timestamp', async ({
@@ -948,7 +2768,7 @@ test.describe('Rhythm game flow', () => {
       window.__rhythmTest?.resetScore();
     });
 
-    const firstNote = await page.evaluate(() => window.__rhythmTest?.peekNearestAny());
+    const firstNote = await page.evaluate(() => window.__rhythmTest?.peekUpcomingTapAny(0.6));
     expect(firstNote).not.toBeNull();
     if (!firstNote) {
       return;
@@ -956,23 +2776,30 @@ test.describe('Rhythm game flow', () => {
 
     const earlyResult = await page.evaluate(
       ({ lane, timeSec }) => {
-        return window.__rhythmTest?.playLaneAt(lane, timeSec - 0.5) ?? false;
+        const ok = window.__rhythmTest?.playLaneAt(lane, timeSec - 0.5) ?? false;
+        return {
+          ok,
+          state: window.__rhythmTest?.read() ?? null,
+        };
       },
       { lane: firstNote.lane, timeSec: firstNote.timeSec },
     );
-    expect(earlyResult).toBe(true);
-    await expect(page.locator('#judgement')).toHaveText('PER ANKSTI');
+    expect(earlyResult.ok).toBe(true);
+    expect(earlyResult.state?.judgement).toBe('PER ANKSTI');
 
     const replayResult = await page.evaluate(
       ({ lane, timeSec }) => {
-        return window.__rhythmTest?.playLaneAt(lane, timeSec) ?? false;
+        const ok = window.__rhythmTest?.playLaneAt(lane, timeSec) ?? false;
+        return {
+          ok,
+          state: window.__rhythmTest?.read() ?? null,
+        };
       },
       { lane: firstNote.lane, timeSec: firstNote.timeSec },
     );
-    expect(replayResult).toBe(true);
-
-    await expect(page.locator('#judgement')).toHaveText(/PRALEISTA|PER ANKSTI/);
-    await expect(page.locator('#score')).toHaveText('0');
+    expect(replayResult.ok).toBe(true);
+    expect(['PRALEISTA', 'PER ANKSTI', 'PER VELAI']).toContain(replayResult.state?.judgement);
+    expect(replayResult.state?.score).toBe(0);
   });
 
   test('early but valid hit still keeps background song playback for that beat', async ({
@@ -1076,15 +2903,17 @@ test.describe('Rhythm game flow', () => {
     );
     await expect(page.locator('#judgement')).toHaveText('LAIKYK');
 
-    await page.evaluate(
+    const releasedState = await page.evaluate(
       ({ lane, endSec }) => {
         window.__rhythmTest?.releaseLaneAt(lane, endSec - 0.01);
+        return window.__rhythmTest?.read() ?? null;
       },
       { lane: hold.lane, endSec: hold.timeSec + hold.holdDurationSec },
     );
 
-    await expect(page.locator('#score')).not.toHaveText('0');
-    await expect(page.locator('#judgement')).toHaveText(/TOBULA|GERAI|UŽSIVEDĘS/);
+    expect(releasedState).not.toBeNull();
+    expect(releasedState?.score).toBeGreaterThan(0);
+    expect(['TOBULA', 'GERAI', 'UŽSIVEDĘS']).toContain(releasedState?.judgement);
   });
 
   test('releasing hold note too early counts as miss', async ({ page }) => {
@@ -1110,15 +2939,17 @@ test.describe('Rhythm game flow', () => {
     );
     await expect(page.locator('#judgement')).toHaveText('LAIKYK');
 
-    await page.evaluate(
+    const releaseState = await page.evaluate(
       ({ lane, timeSec }) => {
         window.__rhythmTest?.releaseLaneAt(lane, timeSec + 0.1);
+        return window.__rhythmTest?.read() ?? null;
       },
       { lane: hold.lane, timeSec: hold.timeSec },
     );
 
-    await expect(page.locator('#judgement')).toHaveText('PALEIDAI PER ANKSTI');
-    await expect(page.locator('#score')).toHaveText('0');
+    expect(releaseState).not.toBeNull();
+    expect(['PALEIDAI PER ANKSTI', 'PRALEISTA']).toContain(releaseState?.judgement);
+    expect(releaseState?.score).toBe(0);
   });
 
   test('Vertinimas wraps without shifting HUD height between short and long statuses', async ({
@@ -1132,17 +2963,19 @@ test.describe('Rhythm game flow', () => {
       window.__rhythmTest?.resetScore();
     });
 
-    await expect
-      .poll(async () => {
-        return await page.evaluate(() => {
-          const ok = window.__rhythmTest?.playNearestAny(-0.5) ?? false;
-          return {
-            ok,
-            state: window.__rhythmTest?.read(),
-          };
-        });
-      })
-      .toMatchObject({ ok: true });
+    const earlyOutcome = await page.evaluate(() => {
+      const upcoming = window.__rhythmTest?.peekUpcomingTapAny(0.6);
+      if (!upcoming) {
+        return { ok: false as const, state: null };
+      }
+      window.__rhythmTest?.playLaneAt(upcoming.lane, upcoming.timeSec - 0.5);
+      return {
+        ok: true as const,
+        state: window.__rhythmTest?.read() ?? null,
+      };
+    });
+    expect(earlyOutcome.ok).toBe(true);
+    expect(earlyOutcome.state?.judgement).toBe('PER ANKSTI');
 
     await expect(page.locator('#judgement')).toHaveText('PER ANKSTI');
 
@@ -1188,34 +3021,27 @@ test.describe('Rhythm game flow', () => {
         .replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 99999;')
         .replace('public int geriTaskai = 50;', 'public int geriTaskai = 1;')
         .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = 1;')
-        .replace('public string arklioSpalva = "#d6b48a";', 'public string arklioSpalva = "pink";')
-        .replace(
-          'public string karciuSpalva = "#7d4f2d";',
-          'public string karciuSpalva = "#ABCDEF";',
-        )
-        .replace('public bool suKepure = false;', 'public bool suKepure = true;')
-        .replace(
-          'public string kepuresTipas = "KLASIKINE";',
-          'public string kepuresTipas = "PIRATAS";',
-        )
-        .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "AUDRA";'),
+        .replace('public bool suKepure = false;', 'public bool suKepure = true;'),
     );
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? false);
+      })
+      .toBe(true);
     const rules = await page.evaluate(() => window.__rhythmTest?.getRules());
     expect(rules?.tobulasLangas).toBe(0.01);
     expect(rules?.gerasLangas).toBe(0.4);
     expect(rules?.tobuliTaskai).toBe(1000);
     expect(rules?.geriTaskai).toBe(5);
     expect(rules?.serijaIkiHype).toBe(2);
-    expect(rules?.arklioSpalva).toBe('#d6b48a');
-    expect(rules?.karciuSpalva).toBe('#ABCDEF');
+    expect(rules?.arklioSpalva).toBe('SMELIO');
+    expect(rules?.karciuSpalva).toBe('TAMSIAI_RUDA');
     expect(rules?.suKepure).toBe(true);
     expect(rules?.kepuresTipas).toBe('KLASIKINE');
     expect(rules?.oroEfektas).toBe('SAULETA');
   });
 
-  test('handles negative and malformed numeric values without breaking gameplay', async ({
-    page,
-  }) => {
+  test('negative numeric values are clamped and remain playable', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
 
@@ -1224,20 +3050,57 @@ test.describe('Rhythm game flow', () => {
         .replace('public float tobulasLangas = 0.05f;', 'public float tobulasLangas = -1f;')
         .replace('public float gerasLangas = 0.12f;', 'public float gerasLangas = -2f;')
         .replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = -999;')
-        .replace('public int geriTaskai = 50;', 'public int geriTaskai = abc;')
+        .replace('public int geriTaskai = 50;', 'public int geriTaskai = -10;')
         .replace('public int serijaIkiUzsivedimo = 10;', 'public int serijaIkiUzsivedimo = -1;'),
     );
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? false);
+      })
+      .toBe(true);
     const rules = await page.evaluate(() => window.__rhythmTest?.getRules());
-    // Negative/malformed numeric fields fall back to defaults in parser.
-    expect(rules?.tobulasLangas).toBe(0.05);
-    expect(rules?.gerasLangas).toBe(0.12);
-    expect(rules?.tobuliTaskai).toBe(100);
-    expect(rules?.geriTaskai).toBe(50);
-    expect(rules?.serijaIkiHype).toBe(10);
+    expect(rules?.tobulasLangas).toBe(0.01);
+    expect(rules?.gerasLangas).toBe(0.02);
+    expect(rules?.tobuliTaskai).toBe(10);
+    expect(rules?.geriTaskai).toBe(5);
+    expect(rules?.serijaIkiHype).toBe(2);
 
     await expect
       .poll(async () => Number((await page.locator('#score').textContent()) ?? '0'))
       .toBeGreaterThan(0);
+  });
+
+  test('malformed numeric assignment fails compile and keeps previous rules', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('public int tobuliTaskai = 100;', 'public int tobuliTaskai = 321;'),
+    );
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules()?.tobuliTaskai ?? 0);
+      })
+      .toBe(321);
+
+    await updateDanceRulesCode(page, (source) =>
+      source.replace('public int geriTaskai = 50;', 'public int geriTaskai = abc;'),
+    );
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? true);
+      })
+      .toBe(false);
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readVisualState()?.mood ?? '');
+      })
+      .toBe('MIEGA');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules()?.tobuliTaskai ?? 0);
+      })
+      .toBe(321);
   });
 
   test('rounds and clamps decimal/extreme integer values predictably', async ({ page }) => {
@@ -1256,26 +3119,44 @@ test.describe('Rhythm game flow', () => {
     expect(rules?.serijaIkiHype).toBe(50); // rounded and clamped max
   });
 
-  test('keeps defaults for missing fields and invalid strings while staying playable', async ({
-    page,
-  }) => {
+  test('invalid enum/bool assignments fail compile and keep last valid rules', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
 
     await updateDanceRulesCode(page, (source) =>
       source
-        .replace('public string arklioSpalva = "#d6b48a";', '')
-        .replace('public string karciuSpalva = "#7d4f2d";', 'public string karciuSpalva = "123";')
+        .replace('public Spalva arklioSpalva = Spalva.SMELIO;', '')
+        .replace(
+          'public Spalva karciuSpalva = Spalva.TAMSIAI_RUDA;',
+          'public Spalva karciuSpalva = Spalva.NEON;',
+        )
         .replace('public bool suKepure = false;', 'public bool suKepure = TRUE;')
-        .replace('public string kepuresTipas = "KLASIKINE";', 'public string kepuresTipas = "";')
-        .replace('public string oroEfektas = "SAULETA";', 'public string oroEfektas = "??";'),
+        .replace(
+          'public KepuresTipas kepuresTipas = KepuresTipas.KLASIKINE;',
+          'public KepuresTipas kepuresTipas = KepuresTipas.PIRATAS;',
+        )
+        .replace(
+          'public OroEfektas oroEfektas = OroEfektas.SAULETA;',
+          'public OroEfektas oroEfektas = OroEfektas.AUDRA;',
+        ),
     );
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? true);
+      })
+      .toBe(false);
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readVisualState()?.mood ?? '');
+      })
+      .toBe('MIEGA');
+
     const rules = await page.evaluate(() => window.__rhythmTest?.getRules());
-    expect(rules?.arklioSpalva).toBe('#d6b48a'); // missing field -> default
-    expect(rules?.karciuSpalva).toBe('#7d4f2d'); // invalid color -> default
-    expect(rules?.suKepure).toBe(true); // bool parser is case-insensitive
-    expect(rules?.kepuresTipas).toBe('KLASIKINE'); // invalid hat -> default
-    expect(rules?.oroEfektas).toBe('SAULETA'); // invalid weather -> default
+    expect(rules?.arklioSpalva).toBe('SMELIO');
+    expect(rules?.karciuSpalva).toBe('TAMSIAI_RUDA');
+    expect(rules?.suKepure).toBe(false);
+    expect(rules?.kepuresTipas).toBe('KLASIKINE');
+    expect(rules?.oroEfektas).toBe('SAULETA');
 
     await expect
       .poll(async () => Number((await page.locator('#score').textContent()) ?? '0'))

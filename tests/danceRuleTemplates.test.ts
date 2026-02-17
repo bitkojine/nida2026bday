@@ -17,11 +17,14 @@ describe('danceRuleTemplates', () => {
       expect(result).toContain(
         `public int serijaIkiUzsivedimo = ${template.values.serijaIkiUzsivedimo};`,
       );
-      expect(result).toContain(`public string arklioSpalva = ${template.values.arklioSpalva};`);
-      expect(result).toContain(`public string karciuSpalva = ${template.values.karciuSpalva};`);
+      expect(result).toContain(`return ${template.values.akiuSpalva};`);
+      expect(result).toContain(`public Spalva arklioSpalva = ${template.values.arklioSpalva};`);
+      expect(result).toContain(`public Spalva karciuSpalva = ${template.values.karciuSpalva};`);
       expect(result).toContain(`public bool suKepure = ${template.values.suKepure};`);
-      expect(result).toContain(`public string kepuresTipas = ${template.values.kepuresTipas};`);
-      expect(result).toContain(`public string oroEfektas = ${template.values.oroEfektas};`);
+      expect(result).toContain(
+        `public KepuresTipas kepuresTipas = ${template.values.kepuresTipas};`,
+      );
+      expect(result).toContain(`public OroEfektas oroEfektas = ${template.values.oroEfektas};`);
     }
   });
 
@@ -34,9 +37,25 @@ describe('danceRuleTemplates', () => {
     expect(withHat.length).toBeGreaterThanOrEqual(5);
 
     const hatTypes = new Set(withHat.map((template) => template.values.kepuresTipas));
-    expect(hatTypes.has('"KAUBOJAUS"')).toBe(true);
-    expect(hatTypes.has('"KARUNA"')).toBe(true);
-    expect(hatTypes.has('"RAGANOS"')).toBe(true);
+    expect(hatTypes.has('KepuresTipas.KAUBOJAUS')).toBe(true);
+    expect(hatTypes.has('KepuresTipas.KARUNA')).toBe(true);
+    expect(hatTypes.has('KepuresTipas.RAGANOS')).toBe(true);
     expect(hatTypes.size).toBeGreaterThanOrEqual(3);
+  });
+
+  it('keeps templates visually and mood-wise diverse', () => {
+    const weatherTypes = new Set(
+      DANCE_RULE_TEMPLATES.map((template) => template.values.oroEfektas),
+    );
+    const eyeColors = new Set(DANCE_RULE_TEMPLATES.map((template) => template.values.akiuSpalva));
+    const bodyManePairs = new Set(
+      DANCE_RULE_TEMPLATES.map(
+        (template) => `${template.values.arklioSpalva}/${template.values.karciuSpalva}`,
+      ),
+    );
+
+    expect(weatherTypes.size).toBeGreaterThanOrEqual(3);
+    expect(eyeColors.size).toBeGreaterThanOrEqual(5);
+    expect(bodyManePairs.size).toBe(DANCE_RULE_TEMPLATES.length);
   });
 });

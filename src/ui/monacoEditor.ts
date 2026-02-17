@@ -19,6 +19,7 @@ export async function mountMonacoEditor(el: HTMLElement, initial: string): Promi
     fontSize: isTouchViewport ? 14 : 11,
     minimap: { enabled: false },
     scrollBeyondLastLine: false,
+    renderFinalNewline: true,
     automaticLayout: true,
     lineNumbersMinChars: 2,
     wordWrap: 'on',

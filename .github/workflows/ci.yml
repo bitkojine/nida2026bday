@@ -1,23 +1,24 @@
-name: E2E Tests
+name: CI
 
 on:
-  schedule:
-    - cron: '30 2 * * *'
+  pull_request:
   push:
     branches:
       - main
+  schedule:
+    - cron: '0 2 * * *'
   workflow_dispatch:
 
 env:
   VITE_REAL_COMPILER_API_URL: https://nida2026bday-real-compiler.onrender.com
 
-concurrency:
-  group: e2e-${{ github.ref }}
-  cancel-in-progress: true
-
 permissions:
   actions: read
   contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   schedule-guard:
@@ -42,7 +43,7 @@ jobs:
             const runs = await github.paginate(github.rest.actions.listWorkflowRuns, {
               owner,
               repo,
-              workflow_id: 'e2e.yml',
+              workflow_id: 'ci.yml',
               event: 'schedule',
               status: 'completed',
               per_page: 25,
@@ -60,19 +61,11 @@ jobs:
               previousSuccess.head_sha === currentSha ? 'false' : 'true',
             );
 
-  e2e-functional:
-    name: E2E Functional (${{ matrix.project }})
+  quick-feedback:
+    name: Quick Feedback (<30s target)
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    needs: schedule-guard
-    if: github.event_name != 'schedule' || needs.schedule-guard.outputs.should_run == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        project:
-          - desktop-chromium
-          - iphone-12-pro-max
-          - iphone-15-pro
+    timeout-minutes: 5
+    if: github.event_name != 'schedule'
 
     steps:
       - name: Checkout
@@ -87,34 +80,21 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit --no-fund
 
-      - name: Install Playwright browsers (Chromium + WebKit)
-        run: npx playwright install --with-deps chromium webkit
+      - name: Install Playwright browser (WebKit)
+        run: npx playwright install --with-deps webkit
 
-      - name: Run E2E tests for matrix project
-        run: npm run test:e2e -- --project="${{ matrix.project }}" --grep-invert="@perf" --max-failures=1
+      - name: 30s quality bundle
+        run: npm run check:30s
 
-      - name: Upload Playwright report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report-functional-${{ matrix.project }}
-          path: playwright-report
-          if-no-files-found: ignore
-          retention-days: 7
+      - name: Real compiler backend integration
+        run: npm run check:real-compiler-backend
 
-  e2e-perf:
-    name: E2E Perf (${{ matrix.project }})
+  nightly-quality:
+    name: Nightly Quality (unit + build)
     runs-on: ubuntu-latest
     timeout-minutes: 25
+    if: github.event_name == 'schedule' && needs.schedule-guard.outputs.should_run == 'true'
     needs: schedule-guard
-    if: github.event_name != 'schedule' || needs.schedule-guard.outputs.should_run == 'true'
-    strategy:
-      fail-fast: false
-      matrix:
-        project:
-          - desktop-chromium
-          - iphone-12-pro-max
-          - iphone-15-pro
 
     steps:
       - name: Checkout
@@ -129,26 +109,20 @@ jobs:
       - name: Install dependencies
         run: npm ci --prefer-offline --no-audit --no-fund
 
-      - name: Install Playwright browsers (Chromium + WebKit)
-        run: npx playwright install --with-deps chromium webkit
+      - name: Unit tests (with coverage)
+        run: npm run test
 
-      - name: Run perf E2E tests for matrix project
-        run: npm run test:e2e -- --project="${{ matrix.project }}" --grep="@perf-common" --max-failures=1
+      - name: Build
+        run: npm run build
 
-      - name: Upload Playwright report
+      - name: Real compiler backend integration
+        run: npm run check:real-compiler-backend
+
+      - name: Upload coverage artifact
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: playwright-report-perf-${{ matrix.project }}
-          path: playwright-report
+          name: coverage-nightly
+          path: coverage
           if-no-files-found: ignore
           retention-days: 7
-
-      - name: Upload resource soak timelines
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: resource-soak-timeline-${{ matrix.project }}
-          path: test-results/**/resource-soak-*.json
-          if-no-files-found: ignore
-          retention-days: 14

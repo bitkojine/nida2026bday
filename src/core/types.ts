@@ -1,8 +1,35 @@
 export type Judgement = 'TOBULA' | 'GERAI' | 'PRALEISTA';
 
-export type HorseMood = Judgement | 'UZSIVEDIMAS';
+export type HorseMood = Judgement | 'UZSIVEDIMAS' | 'MIEGA';
 export type HorseWeather = 'SAULETA' | 'LIETINGA' | 'SNIEGAS' | 'ZAIBAS';
 export type HorseHat = 'KLASIKINE' | 'KAUBOJAUS' | 'KARUNA' | 'RAGANOS';
+export type HorseColorName =
+  | 'SMELIO'
+  | 'TAMSIAI_RUDA'
+  | 'RUDA'
+  | 'JUODA'
+  | 'BALTA'
+  | 'AUKSINE'
+  | 'ROZINE'
+  | 'MELYNA'
+  | 'ZALIA'
+  | 'VIOLETINE'
+  | 'ORANZINE';
+export const HORSE_WEATHERS: readonly HorseWeather[] = ['SAULETA', 'LIETINGA', 'SNIEGAS', 'ZAIBAS'];
+export const HORSE_HATS: readonly HorseHat[] = ['KLASIKINE', 'KAUBOJAUS', 'KARUNA', 'RAGANOS'];
+export const HORSE_COLOR_NAMES: readonly HorseColorName[] = [
+  'SMELIO',
+  'TAMSIAI_RUDA',
+  'RUDA',
+  'JUODA',
+  'BALTA',
+  'AUKSINE',
+  'ROZINE',
+  'MELYNA',
+  'ZALIA',
+  'VIOLETINE',
+  'ORANZINE',
+];
 
 export interface DanceRules {
   tobulasLangas: number;
@@ -10,8 +37,9 @@ export interface DanceRules {
   tobuliTaskai: number;
   geriTaskai: number;
   serijaIkiHype: number;
-  arklioSpalva: string;
-  karciuSpalva: string;
+  akiuSpalva: HorseColorName;
+  arklioSpalva: HorseColorName;
+  karciuSpalva: HorseColorName;
   suKepure: boolean;
   kepuresTipas: HorseHat;
   oroEfektas: HorseWeather;
@@ -32,6 +60,7 @@ export interface CompileResult {
   rules: DanceRules;
   errors: string[];
   mode: 'wasm' | 'fallback';
+  syntaxEngine: 'tree-sitter-wasm' | 'none';
 }
 
 export const DEFAULT_RULES: DanceRules = {
@@ -40,8 +69,9 @@ export const DEFAULT_RULES: DanceRules = {
   tobuliTaskai: 100,
   geriTaskai: 50,
   serijaIkiHype: 10,
-  arklioSpalva: '#d6b48a',
-  karciuSpalva: '#7d4f2d',
+  akiuSpalva: 'JUODA',
+  arklioSpalva: 'SMELIO',
+  karciuSpalva: 'TAMSIAI_RUDA',
   suKepure: false,
   kepuresTipas: 'KLASIKINE',
   oroEfektas: 'SAULETA',

@@ -1,6 +1,12 @@
 import './style.css';
 import { GameAudio } from './audio/gameAudio';
 import { DEDICATION_TEXT } from './core/dedicationBanner';
+import {
+  clearPersistedEditorSource,
+  EDITOR_SOURCE_STORAGE_KEY,
+  readPersistedEditorSource,
+  writePersistedEditorSource,
+} from './core/editorSourceStorage';
 import { GameStateManager } from './core/gameStateManager';
 import { normalizeLaneFromKey } from './core/inputController';
 import { buildLayoutMetrics } from './core/layoutManager';
@@ -8,19 +14,46 @@ import { computeNoteYPercent } from './core/noteLayout';
 import type { HitEvaluation } from './core/rhythmEngine';
 import { RhythmEngine } from './core/rhythmEngine';
 import { createRuntimeScope } from './core/runtimeScope';
+import { readResourceStatsSnapshot } from './core/resourceTracker';
 import { planSongPlaybackBatch } from './core/songPlaybackPlanner';
 import { DEFAULT_SONG_MAP } from './core/songMap';
-import { DEFAULT_RULES, type DanceRules, type HorseMood, type Judgement } from './core/types';
-import { HorseAnimator } from './render/horseAnimator';
+import {
+  cancelTrackedAnimationFrame,
+  clearTrackedInterval,
+  clearTrackedTimeout,
+  createTrackedAbortController,
+  requestTrackedAnimationFrame,
+  setTrackedInterval,
+  setTrackedTimeout,
+} from './core/trackedAsync';
+import {
+  DEFAULT_RULES,
+  type CompileResult,
+  type DanceRules,
+  type HorseMood,
+  type Judgement,
+} from './core/types';
+import {
+  HorseAnimator,
+  renderWeatherScene,
+  type TechnicalNoticeIconHit,
+  type WeatherSceneRenderMode,
+} from './render/horseAnimator';
 import { CodeCompilerService } from './services/codeCompilerService';
 import { CSHARP_TEMPLATE } from './services/csharpTemplate';
-import { applyCompileResult, wireFallbackCompiler } from './ui/compileFeedback';
-import { evaluatePuzzleProgress } from './ui/codePuzzles';
+import {
+  checkWithRealCompiler,
+  type RealCompilerCheckResult,
+  type RealCompilerDebugDetails,
+} from './services/realCompilerService';
+import { createLatestCompileApplier, wireFallbackCompiler } from './ui/compileFeedback';
+import { CODE_PUZZLES, evaluatePuzzleProgress } from './ui/codePuzzles';
 import { applyDanceRuleTemplate, DANCE_RULE_TEMPLATES } from './ui/danceRuleTemplates';
 import { highlightCSharp } from './ui/fallbackSyntaxHighlighter';
 import {
   bindAudioBootstrapBindings,
   bindElementClick,
+  bindTrackedEventListener,
   bindSimpleEditorResizeBindings,
   bindWindowLifecycle,
   bindWindowResize,
@@ -29,6 +62,32 @@ import { buildWrappedLineNumbers } from './ui/lineNumberGutter';
 import { mountMonacoEditor } from './ui/monacoEditor';
 
 declare const __BUILD_VILNIUS_TIME__: string;
+interface BuildGitLargestFile {
+  path: string;
+  bytes: number;
+}
+
+interface BuildGitHistoryChurnEntry {
+  path: string;
+  totalBytes: number;
+  blobCount: number;
+}
+
+interface BuildGitRepoStats {
+  available: boolean;
+  branch: string;
+  commit: string;
+  trackedFileCount: number;
+  gitDirBytes: number;
+  gitObjectCount: number | null;
+  gitLooseSizeBytes: number | null;
+  gitPackSizeBytes: number | null;
+  largestTrackedFiles: BuildGitLargestFile[];
+  historyChurn: BuildGitHistoryChurnEntry[];
+  error?: string;
+}
+
+declare const __GIT_REPO_STATS__: BuildGitRepoStats;
 
 const app = document.querySelector<HTMLDivElement>('#app');
 if (!app) {
@@ -45,20 +104,60 @@ function requiredElement<T extends Element>(selector: string): T {
 }
 
 app.innerHTML = `
+  <canvas id="weatherSceneCanvas" aria-hidden="true"></canvas>
   <main class="layout">
+    <aside class="compile-notice-rail" id="compileNoticeRail" hidden>
+      <div class="compile-notice-card">
+        <div class="compile-notice-text" id="compileNoticeText">KODAS NESIKOMPILIUOJA</div>
+        <button
+          class="compile-notice-toggle"
+          id="compileNoticeToggle"
+          type="button"
+          aria-label="Rodyti daugiau informacijos"
+          aria-expanded="false"
+          title="Daugiau informacijos"
+        >
+          ?
+        </button>
+      </div>
+    </aside>
     <section class="game" id="gameScreen">
-      <h1>🎁 Šokanti Arklio Ritmo Dovana</h1>
-      <p class="dedication dedication-under-title dedication-footer">${DEDICATION_TEXT} 🎉</p>
+      <p class="hero-copy" id="heroCopy">
+        <strong class="hero-line hero-line-title">🎁 Šokanti Arklio Ritmo Dovana</strong>
+        <span class="hero-line hero-line-subtitle">${DEDICATION_TEXT}</span>
+        <span class="hero-line hero-line-version">Versija: ${__BUILD_VILNIUS_TIME__} (Lietuvos laikas)</span>
+      </p>
       <header class="hud">
         <div><strong>Taškai</strong><span id="score">0</span></div>
         <div><strong>Serija</strong><span id="streak">0</span></div>
         <div><strong>Daugiklis</strong><span id="multiplier">x1</span></div>
         <div><strong>Vertinimas</strong><span id="judgement">PRALEISTA</span></div>
-        <button class="autoplay-toggle" id="autoplayToggle" type="button">Žaisti automatiškai: TAIP</button>
-        <button class="mute-toggle" id="muteToggle" type="button">Garsas: ĮJUNGTAS</button>
+        <button class="autoplay-toggle" id="autoplayToggle" type="button">
+          <span class="toggle-label">Žaisti automatiškai:</span>
+          <span class="toggle-state on">TAIP</span>
+        </button>
+        <button class="mute-toggle" id="muteToggle" type="button">
+          <span class="toggle-label">Garsas:</span>
+          <span class="toggle-state on">ĮJUNGTAS</span>
+        </button>
       </header>
 
-      <canvas id="horseCanvas" aria-label="Šokantis arklys"></canvas>
+      <section class="horse-stage" aria-label="Arklio scena">
+        <canvas id="horseCanvas" aria-label="Šokantis arklys"></canvas>
+        <aside class="horse-compile-notice" id="horseCompileNotice" hidden>
+          <div class="horse-compile-notice-text" id="horseCompileNoticeText">KODAS NESIKOMPILIUOJA</div>
+          <button
+            class="horse-compile-notice-toggle"
+            id="horseCompileNoticeToggle"
+            type="button"
+            aria-label="Rodyti daugiau informacijos"
+            aria-expanded="false"
+            title="Daugiau informacijos"
+          >
+            ?
+          </button>
+        </aside>
+      </section>
 
       <section class="highway-shell" aria-label="Ritmo juostos">
         <div class="highway" id="laneHighway" aria-hidden="true"></div>
@@ -88,7 +187,7 @@ app.innerHTML = `
           Puiku! Arklys sugrojo „Su gimtadieniu“ iki galo. 🎶 🎁 Šablonų atlygis atrakintas!
         </p>
         <p class="puzzle-lock-note" id="templateLockNote">
-          🎁 Atlygis: šablonai. Užbaik visas misijas ir atrakink šablonų mygtukus! ✨
+          <span class="puzzle-label">🎁 Atlygis:</span> šablonai. Užbaik visas misijas ir atrakink šablonų mygtukus!
         </p>
       </section>
 
@@ -113,15 +212,112 @@ app.innerHTML = `
             ).join('')}
           </div>
         </section>
+        <section class="real-compiler-panel" aria-label="Tikro C# kompiliatoriaus tikrinimas">
+          <button class="real-compiler-btn" id="realCompilerCheckButton" type="button">
+            Patikrinti tikru C# kompiliatoriumi
+          </button>
+          <pre class="real-compiler-status" id="realCompilerStatus">Tikras C# kompiliatorius: nepatikrinta.</pre>
+        </section>
       </details>
       <details class="perf-stack" aria-label="Našumo statistika">
         <summary class="collapsible-title">ℹ️ Papildoma informacija apie žaidimą</summary>
         <div class="perf-stack-body">
           <canvas id="audioVisualizer" class="audio-visualizer" aria-label="Garso vizualizatorius"></canvas>
-          <p class="build-number">Versija: ${__BUILD_VILNIUS_TIME__} (Lietuva)</p>
-          <p class="perf-stats" id="perfStats">Našumas: įkeliama...</p>
+          <p class="perf-stats" id="perfStats">Našumas: tikrinama...</p>
+          <section class="danger-zone" aria-label="Pavojinga zona">
+            <h3 class="danger-zone-title">Pavojinga zona</h3>
+            <p class="danger-zone-copy">
+              Čia gali atlikti rizikingus veiksmus: atstatyti tik C# kodą, atstatyti visą žaidimo būseną arba
+              su patvirtinimo kodu atrakinti visas misijas.
+            </p>
+            <div class="danger-zone-actions">
+              <button class="danger-reset-btn" id="resetCodeButton" type="button">
+                Atstatyti tik C# kodą
+              </button>
+              <button class="danger-reset-btn" id="resetProgressButton" type="button">
+                Atstatyti visą žaidimą (progresą, kodą ir garsą)
+              </button>
+              <button class="danger-reset-btn" id="unlockAllMissionsButton" type="button">
+                Atrakinti visas misijas
+              </button>
+            </div>
+          </section>
         </div>
       </details>
+      <dialog class="danger-dialog" id="resetProgressDialog" aria-labelledby="resetProgressTitle">
+        <h3 class="danger-dialog-title" id="resetProgressTitle">Patvirtink progreso ištrynimą</h3>
+        <p class="danger-dialog-copy">
+          Įrašyk <code>yes reset</code>, kad patvirtintum šį neatšaukiamą veiksmą.
+        </p>
+        <label class="danger-dialog-label" for="resetProgressConfirmInput">Patvirtinimas</label>
+        <input
+          class="danger-dialog-input"
+          id="resetProgressConfirmInput"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="yes reset"
+        />
+        <div class="danger-dialog-actions">
+          <button class="danger-dialog-cancel" id="resetProgressCancelButton" type="button">Atšaukti</button>
+          <button class="danger-dialog-confirm" id="resetProgressConfirmButton" type="button" disabled>
+            Ištrinti progresą
+          </button>
+        </div>
+      </dialog>
+      <dialog class="danger-dialog" id="resetCodeDialog" aria-labelledby="resetCodeTitle">
+        <h3 class="danger-dialog-title" id="resetCodeTitle">Patvirtink C# kodo atstatymą</h3>
+        <p class="danger-dialog-copy">
+          Įrašyk <code>reset code</code>, kad atstatytum tik C# kodą į numatytąją būseną.
+        </p>
+        <label class="danger-dialog-label" for="resetCodeConfirmInput">Patvirtinimas</label>
+        <input
+          class="danger-dialog-input"
+          id="resetCodeConfirmInput"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="reset code"
+        />
+        <div class="danger-dialog-actions">
+          <button class="danger-dialog-cancel" id="resetCodeCancelButton" type="button">Atšaukti</button>
+          <button class="danger-dialog-confirm" id="resetCodeConfirmButton" type="button" disabled>
+            Atstatyti kodą
+          </button>
+        </div>
+      </dialog>
+      <dialog
+        class="danger-dialog"
+        id="unlockAllMissionsDialog"
+        aria-labelledby="unlockAllMissionsTitle"
+      >
+        <h3 class="danger-dialog-title" id="unlockAllMissionsTitle">Atrakinti visas misijas</h3>
+        <p class="danger-dialog-copy">
+          Įrašyk slaptą patvirtinimo kodą, kad visos mokymosi misijos būtų pažymėtos kaip įvykdytos.
+        </p>
+        <label class="danger-dialog-label" for="unlockAllMissionsConfirmInput">Patvirtinimo kodas</label>
+        <input
+          class="danger-dialog-input"
+          id="unlockAllMissionsConfirmInput"
+          type="text"
+          autocomplete="off"
+          spellcheck="false"
+          placeholder="slaptas kodas"
+        />
+        <div class="danger-dialog-actions">
+          <button class="danger-dialog-cancel" id="unlockAllMissionsCancelButton" type="button">
+            Atšaukti
+          </button>
+          <button
+            class="danger-dialog-confirm"
+            id="unlockAllMissionsConfirmButton"
+            type="button"
+            disabled
+          >
+            Atrakinti misijas
+          </button>
+        </div>
+      </dialog>
     </section>
   </main>
 `;
@@ -137,6 +333,32 @@ const muteToggleEl = requiredElement<HTMLButtonElement>('#muteToggle');
 const autoplayOverlayEl = requiredElement<HTMLElement>('#autoplayOverlay');
 const audioVisualizerEl = requiredElement<HTMLCanvasElement>('#audioVisualizer');
 const perfStatsEl = requiredElement<HTMLElement>('#perfStats');
+const perfStackEl = requiredElement<HTMLDetailsElement>('.perf-stack');
+const unlockAllMissionsButtonEl = requiredElement<HTMLButtonElement>('#unlockAllMissionsButton');
+const unlockAllMissionsDialogEl = requiredElement<HTMLDialogElement>('#unlockAllMissionsDialog');
+const unlockAllMissionsConfirmInputEl = requiredElement<HTMLInputElement>(
+  '#unlockAllMissionsConfirmInput',
+);
+const unlockAllMissionsCancelButtonEl = requiredElement<HTMLButtonElement>(
+  '#unlockAllMissionsCancelButton',
+);
+const unlockAllMissionsConfirmButtonEl = requiredElement<HTMLButtonElement>(
+  '#unlockAllMissionsConfirmButton',
+);
+const resetProgressButtonEl = requiredElement<HTMLButtonElement>('#resetProgressButton');
+const resetProgressDialogEl = requiredElement<HTMLDialogElement>('#resetProgressDialog');
+const resetProgressConfirmInputEl = requiredElement<HTMLInputElement>('#resetProgressConfirmInput');
+const resetProgressCancelButtonEl = requiredElement<HTMLButtonElement>(
+  '#resetProgressCancelButton',
+);
+const resetProgressConfirmButtonEl = requiredElement<HTMLButtonElement>(
+  '#resetProgressConfirmButton',
+);
+const resetCodeButtonEl = requiredElement<HTMLButtonElement>('#resetCodeButton');
+const resetCodeDialogEl = requiredElement<HTMLDialogElement>('#resetCodeDialog');
+const resetCodeConfirmInputEl = requiredElement<HTMLInputElement>('#resetCodeConfirmInput');
+const resetCodeCancelButtonEl = requiredElement<HTMLButtonElement>('#resetCodeCancelButton');
+const resetCodeConfirmButtonEl = requiredElement<HTMLButtonElement>('#resetCodeConfirmButton');
 const puzzleProgressEl = requiredElement<HTMLElement>('#puzzleProgress');
 const puzzleStoryEl = requiredElement<HTMLElement>('#puzzleStory');
 const puzzleGoalEl = requiredElement<HTMLElement>('#puzzleGoal');
@@ -144,10 +366,20 @@ const puzzleHintEl = requiredElement<HTMLElement>('#puzzleHint');
 const puzzleDoneEl = requiredElement<HTMLElement>('#puzzleDone');
 const templateLockNoteEl = requiredElement<HTMLElement>('#templateLockNote');
 const templateRewardEl = requiredElement<HTMLElement>('#templateReward');
+const realCompilerCheckButtonEl = requiredElement<HTMLButtonElement>('#realCompilerCheckButton');
+const realCompilerStatusEl = requiredElement<HTMLElement>('#realCompilerStatus');
 const laneHighwayEl = requiredElement<HTMLElement>('#laneHighway');
+const codeStudioEl = requiredElement<HTMLDetailsElement>('.code-studio');
 const editorPanelEl = requiredElement<HTMLElement>('#editorPanel');
 const editorResizerEl = requiredElement<HTMLButtonElement>('#editorResizer');
 const canvas = requiredElement<HTMLCanvasElement>('#horseCanvas');
+const weatherSceneCanvas = requiredElement<HTMLCanvasElement>('#weatherSceneCanvas');
+const compileNoticeRailEl = requiredElement<HTMLElement>('#compileNoticeRail');
+const compileNoticeTextEl = requiredElement<HTMLElement>('#compileNoticeText');
+const compileNoticeToggleEl = requiredElement<HTMLButtonElement>('#compileNoticeToggle');
+const horseCompileNoticeEl = requiredElement<HTMLElement>('#horseCompileNotice');
+const horseCompileNoticeTextEl = requiredElement<HTMLElement>('#horseCompileNoticeText');
+const horseCompileNoticeToggleEl = requiredElement<HTMLButtonElement>('#horseCompileNoticeToggle');
 const editorHost = requiredElement<HTMLDivElement>('#editor');
 
 const state = new GameStateManager();
@@ -159,14 +391,41 @@ const silentAudio =
   navigator.webdriver;
 const audio = new GameAudio(silentAudio);
 const HYPE_LABEL = 'UŽSIVEDĘS';
-const FOOTER_CREDITS_LINE = 'Sukurta su meile: Robertas Rudys, 2026 m.';
+const FOOTER_CREDITS_LINE = 'Sukurta su meile Roberto Rudžio, 2026 m.';
 const REPO_URL = 'https://github.com/bitkojine/nida2026bday';
+const RESET_CONFIRMATION_PHRASE = 'yes reset';
+const RESET_CODE_CONFIRMATION_PHRASE = 'reset code';
+const UNLOCK_MISSIONS_CODE_HASH_SHA256 =
+  '51d4c79aa78e1fdb405ebcafe7922d38278da939f411c9980a2a57cd954a8c28';
 const HUD_VALUE_MAX_FONT_PX = 14;
 const HUD_VALUE_MIN_FONT_PX = 9;
+const TOGGLE_LABEL_MAX_FONT_PX = 12;
+const TOGGLE_LABEL_MIN_FONT_PX = 8;
 const IS_COARSE_POINTER = window.matchMedia('(pointer: coarse)').matches;
-const PUZZLE_UNLOCK_STORAGE_KEY = 'nida2026bday:puzzlesUnlocked:v1';
+const MOBILE_PERF_MAX_WIDTH_PX = 900;
+const PUZZLE_PROGRESS_STORAGE_KEY = 'nida2026bday:puzzlesSolvedCount:v1';
 const SOUND_MUTED_STORAGE_KEY = 'nida2026bday:soundMuted:v1';
-const LOCAL_STORAGE_KEYS_USED = [PUZZLE_UNLOCK_STORAGE_KEY, SOUND_MUTED_STORAGE_KEY];
+const LOCAL_STORAGE_KEYS_USED = [
+  PUZZLE_PROGRESS_STORAGE_KEY,
+  SOUND_MUTED_STORAGE_KEY,
+  EDITOR_SOURCE_STORAGE_KEY,
+];
+const EDITOR_PANEL_MIN_HEIGHT_PX = 220;
+const EDITOR_PANEL_MAX_HEIGHT_PX = 2000;
+const EDITOR_PANEL_VERTICAL_PADDING_PX = 40;
+const EDITOR_PANEL_AUTOSIZE_FUDGE_PX = 2;
+const WEATHER_SCENE_MAX_DPR = 1.25;
+const WEATHER_SCENE_MAX_PIXELS = 2_200_000;
+const WEATHER_VISUAL_FPS_COARSE = 22;
+const WEATHER_VISUAL_FPS_FINE = 60;
+const AUDIO_VIZ_FPS_COARSE = 28;
+const AUDIO_VIZ_FPS_FINE = 60;
+const HORSE_VISUAL_FPS_COARSE = 34;
+const HORSE_VISUAL_FPS_FINE = 60;
+const LANE_VISUAL_FPS_COARSE = 34;
+const LANE_VISUAL_FPS_FINE = 60;
+const COMPILE_NOTICE_RAIL_MIN_WIDTH_PX = 1080;
+const COMPILE_NOTICE_RAIL_CONTENT_GAP_PX = 10;
 
 let rules: DanceRules = DEFAULT_RULES;
 let mood: HorseMood = 'GERAI';
@@ -175,21 +434,96 @@ let loopRafId: number | null = null;
 let audioRetryIntervalId: number | null = null;
 let lastFrameTimeMs: number | null = null;
 let lastVisualRenderMs = 0;
+let lastWeatherRenderMs = -Number.MAX_VALUE;
+let lastAudioVizRenderMs = -Number.MAX_VALUE;
+let lastHorseRenderMs = -Number.MAX_VALUE;
+let lastLaneRenderMs = -Number.MAX_VALUE;
 let perfWindowStartMs = performance.now();
 let perfFrameCount = 0;
 let perfFrameMsTotal = 0;
+let latestMeasuredFps = 0;
+let latestMeasuredFrameMs = 0;
 let perfLastMemorySampleMs = 0;
 let perfMemorySampleInFlight = false;
 let perfMemoryText = 'tikrinama...';
-let perfLocalStorageLines = ['Vietinė saugykla: tikrinama...'];
+interface LocalStorageDebugStats {
+  availability: string;
+  keyCount: string;
+  ownKeys: string;
+  ownKeyValues: string[];
+  approxUsed: string;
+  browserStorage: string;
+}
+
+function buildPendingLocalStorageDebugStats(): LocalStorageDebugStats {
+  return {
+    availability: 'tikrinama...',
+    keyCount: 'tikrinama...',
+    ownKeys: 'tikrinama...',
+    ownKeyValues: LOCAL_STORAGE_KEYS_USED.map(() => 'tikrinama...'),
+    approxUsed: 'tikrinama...',
+    browserStorage: 'tikrinama...',
+  };
+}
+
+let perfLocalStorageStats = buildPendingLocalStorageDebugStats();
+let lastPerfStatsIndentPx = -1;
+let lastLaneMarkup = '';
 let lastVisibleNoteCount = 0;
+let latestVisualizerBars: number[] = new Array(52).fill(0);
 let disposed = false;
 let autoplayEnabled = true;
 let soundMuted = false;
+let compileIsValid = true;
+let latestCompileResult: CompileResult | null = null;
+let latestRealCompilerNotice = 'Tikras C# kompiliatorius dar nepaleistas rankiniu mygtuku.';
+let latestRealCompilerDetailLines = ['Tikro C# kompiliatoriaus užklausos dar nėra.'];
+let latestRealCompilerDetails: RealCompilerDebugDetails | null = null;
+let cachedTechnicalNoticeSignature = '';
+let cachedTechnicalNoticeLines: string[] | null = null;
+let technicalNoticeExpanded = false;
+let weatherTechnicalNoticeIconHit: TechnicalNoticeIconHit | null = null;
 let pendingEditorSource: string | null = null;
-let readEditorSource = (): string => pendingEditorSource ?? CSHARP_TEMPLATE;
+let editorPanelAutoSized = false;
+let canvasStabilizeRafId: number | null = null;
+let weatherSceneDpr = 1;
+const fallbackMeasureCtx = document.createElement('canvas').getContext('2d');
+const ensureTrailingEmptyLine = (source: string): string => {
+  const withoutTrailingBreaks = source.replace(/[\r\n]+$/g, '');
+  return `${withoutTrailingBreaks}\n`;
+};
+
+function readBrowserLocalStorageOrNull(): Storage | null {
+  try {
+    return window.localStorage;
+  } catch {
+    return null;
+  }
+}
+
+function readInitialEditorSource(): string {
+  const fallback = ensureTrailingEmptyLine(CSHARP_TEMPLATE);
+  const storage = readBrowserLocalStorageOrNull();
+  if (!storage) {
+    return fallback;
+  }
+  return ensureTrailingEmptyLine(readPersistedEditorSource(storage, fallback));
+}
+
+function persistEditorSource(source: string): void {
+  const storage = readBrowserLocalStorageOrNull();
+  if (!storage) {
+    return;
+  }
+  writePersistedEditorSource(storage, ensureTrailingEmptyLine(source));
+}
+
+const INITIAL_EDITOR_SOURCE = readInitialEditorSource();
+let readEditorSource = (): string => pendingEditorSource ?? INITIAL_EDITOR_SOURCE;
 let writeEditorSource = (next: string): void => {
-  pendingEditorSource = next;
+  const normalized = ensureTrailingEmptyLine(next);
+  pendingEditorSource = normalized;
+  persistEditorSource(normalized);
 };
 const audioBootstrapScope = createRuntimeScope();
 const editorScope = createRuntimeScope();
@@ -199,9 +533,13 @@ const autoplayScope = createRuntimeScope();
 const windowLifecycleScope = createRuntimeScope();
 const templateScope = createRuntimeScope();
 const editorResizeScope = createRuntimeScope();
-let puzzlesUnlocked = false;
+const dangerZoneScope = createRuntimeScope();
+const realCompilerScope = createRuntimeScope();
+let persistedSolvedPuzzleCount = 0;
 const autoPlayedBeatIds = new Set<number>();
 const songPlayedBeatIds = new Set<number>();
+const MAX_TRACKED_AUTO_PLAYED_BEATS = 256;
+const MAX_TRACKED_SONG_PLAYED_BEATS = 512;
 const pendingSongBeats = new Map<
   number,
   { id: number; timeSec: number; toneHz: number; holdDurationSec: number }
@@ -219,11 +557,142 @@ interface ActiveHold {
 
 const activeHolds = new Map<number, ActiveHold>();
 
+function autoSizeEditorPanelForInitialLoad(visualLineCount: number, lineHeightPx: number): void {
+  if (editorPanelAutoSized) {
+    return;
+  }
+
+  const safeLineCount = Math.max(1, Math.round(visualLineCount));
+  const safeLineHeightPx = Math.max(14, Math.min(40, lineHeightPx));
+  const targetHeightPx = Math.round(
+    safeLineCount * safeLineHeightPx + EDITOR_PANEL_VERTICAL_PADDING_PX,
+  );
+  const clampedHeightPx = Math.max(
+    EDITOR_PANEL_MIN_HEIGHT_PX,
+    Math.min(EDITOR_PANEL_MAX_HEIGHT_PX, targetHeightPx),
+  );
+  editorPanelEl.style.height = `${clampedHeightPx}px`;
+  editorPanelAutoSized = true;
+}
+
+function parseCssPx(value: string): number {
+  const parsed = Number.parseFloat(value);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function estimateFallbackCharsPerVisualLine(fallback: HTMLTextAreaElement): number {
+  const style = window.getComputedStyle(fallback);
+  if (fallbackMeasureCtx) {
+    fallbackMeasureCtx.font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
+  }
+  const sample = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  const sampleWidth = fallbackMeasureCtx?.measureText(sample).width ?? 434;
+  const avgCharWidth = Math.max(1, sampleWidth / sample.length);
+  const horizontalPadding = parseCssPx(style.paddingLeft) + parseCssPx(style.paddingRight);
+  const availableWidth = Math.max(24, fallback.clientWidth - horizontalPadding);
+  return Math.max(1, Math.floor(availableWidth / avgCharWidth));
+}
+
+function estimateFallbackContentHeightPx(fallback: HTMLTextAreaElement): number {
+  const style = window.getComputedStyle(fallback);
+  const lineHeightPx = Math.max(
+    14,
+    parseCssPx(style.lineHeight) || parseCssPx(style.fontSize) * 1.45,
+  );
+  const verticalPadding = parseCssPx(style.paddingTop) + parseCssPx(style.paddingBottom);
+  const visualLineCount = Math.max(
+    1,
+    buildWrappedLineNumbers(fallback.value, estimateFallbackCharsPerVisualLine(fallback))
+      .split('\n')
+      .filter((line) => line.trim().length > 0).length,
+  );
+  return Math.round(visualLineCount * lineHeightPx + verticalPadding);
+}
+
+function computeFallbackRequiredPanelHeightPx(fallback: HTMLTextAreaElement): number {
+  const hasOverflow = fallback.scrollHeight > fallback.clientHeight + 1;
+  const contentHeightPx = hasOverflow
+    ? Math.max(1, Math.round(fallback.scrollHeight))
+    : estimateFallbackContentHeightPx(fallback);
+  return Math.max(
+    EDITOR_PANEL_MIN_HEIGHT_PX,
+    Math.min(
+      EDITOR_PANEL_MAX_HEIGHT_PX,
+      Math.round(contentHeightPx + EDITOR_PANEL_AUTOSIZE_FUDGE_PX),
+    ),
+  );
+}
+
+function fitEditorPanelToFallbackContent(fallback: HTMLTextAreaElement): void {
+  const targetHeightPx = computeFallbackRequiredPanelHeightPx(fallback);
+  const currentHeightPx = Math.round(editorPanelEl.getBoundingClientRect().height);
+  if (Math.abs(targetHeightPx - currentHeightPx) <= 1) {
+    editorPanelAutoSized = true;
+    return;
+  }
+  editorPanelEl.style.height = `${targetHeightPx}px`;
+  editorPanelAutoSized = true;
+}
+
+function stabilizeEditorPanelAutoSize(fallback: HTMLTextAreaElement, remainingFrames = 8): void {
+  if (remainingFrames <= 0) {
+    return;
+  }
+
+  fitEditorPanelToFallbackContent(fallback);
+  const overflowPx = fallback.scrollHeight - fallback.clientHeight;
+  if (overflowPx <= 1) {
+    return;
+  }
+
+  requestTrackedAnimationFrame(window, () => {
+    stabilizeEditorPanelAutoSize(fallback, remainingFrames - 1);
+  });
+}
+
+function tryAutoSizeEditorPanelForInitialLoad(): void {
+  if (editorPanelAutoSized) {
+    return;
+  }
+
+  if (!codeStudioEl.open) {
+    return;
+  }
+
+  if (editorPanelEl.clientWidth <= 0 || editorPanelEl.clientHeight <= 0) {
+    return;
+  }
+
+  const fallback = document.querySelector<HTMLTextAreaElement>('#fallbackCode');
+  if (fallback && fallback.clientWidth > 0) {
+    fitEditorPanelToFallbackContent(fallback);
+    return;
+  }
+
+  const lineCount = readEditorSource().split('\n').length;
+  autoSizeEditorPanelForInitialLoad(lineCount, 19);
+}
+
+function growEditorPanelToFitFallbackContent(fallback: HTMLTextAreaElement): void {
+  const currentHeightPx = Math.round(editorPanelEl.getBoundingClientRect().height);
+  const targetHeightPx = computeFallbackRequiredPanelHeightPx(fallback);
+  if (targetHeightPx <= currentHeightPx + 1) {
+    return;
+  }
+
+  editorPanelEl.style.height = `${targetHeightPx}px`;
+}
+
 const ctxOrNull = canvas.getContext('2d');
 if (!ctxOrNull) {
   throw new Error('Canvas context unavailable');
 }
 const ctx: CanvasRenderingContext2D = ctxOrNull;
+const weatherSceneCtxOrNull = weatherSceneCanvas.getContext('2d');
+if (!weatherSceneCtxOrNull) {
+  throw new Error('Weather scene context unavailable');
+}
+const weatherSceneCtx: CanvasRenderingContext2D = weatherSceneCtxOrNull;
 const audioVizCtxOrNull = audioVisualizerEl.getContext('2d');
 if (!audioVizCtxOrNull) {
   throw new Error('Audio visualizer context unavailable');
@@ -235,7 +704,345 @@ const allowedWeather = new Set(['SAULETA', 'LIETINGA', 'SNIEGAS', 'ZAIBAS']);
 
 function applyGlobalWeatherTheme(weather: string): void {
   const normalized = allowedWeather.has(weather) ? weather : 'SAULETA';
+  document.documentElement.setAttribute('data-weather', normalized);
   document.body.setAttribute('data-weather', normalized);
+}
+
+function setCompileValidityState(isValid: boolean, result: CompileResult): void {
+  const wasValid = compileIsValid;
+  latestCompileResult = result;
+  cachedTechnicalNoticeSignature = '';
+  cachedTechnicalNoticeLines = null;
+  compileIsValid = isValid;
+  if (isValid) {
+    technicalNoticeExpanded = false;
+  }
+  if (!isValid && wasValid) {
+    horseAnimator.clearNoteParticles();
+  }
+  renderCompileNoticeRail();
+  renderHorseCompileNotice();
+}
+
+function setRealCompilerNotice(
+  message: string,
+  detailLines?: string[],
+  details?: RealCompilerDebugDetails | null,
+): void {
+  latestRealCompilerNotice = message.trim();
+  if (detailLines) {
+    latestRealCompilerDetailLines = detailLines;
+  }
+  if (details !== undefined) {
+    latestRealCompilerDetails = details;
+  }
+  cachedTechnicalNoticeSignature = '';
+  cachedTechnicalNoticeLines = null;
+  renderCompileNoticeRail();
+  renderHorseCompileNotice();
+}
+
+function prettyJsonOrRaw(value: string | null): string {
+  const normalized = typeof value === 'string' ? value.trim() : '';
+  if (!normalized) {
+    return '(tuščia)';
+  }
+  try {
+    return JSON.stringify(JSON.parse(normalized), null, 2);
+  } catch {
+    return normalized;
+  }
+}
+
+function highlightJsonForNotice(value: string): string {
+  const tokenRegex =
+    /("(\\u[a-zA-Z0-9]{4}|\\[^u]|[^\\"])*"(\s*:)?|\b(true|false|null)\b|-?\d+(?:\.\d*)?(?:[eE][+\-]?\d+)?|[{}[\],:])/g;
+  let html = '';
+  let cursor = 0;
+  for (const match of value.matchAll(tokenRegex)) {
+    const index = match.index ?? 0;
+    if (index > cursor) {
+      html += escapeHtml(value.slice(cursor, index));
+    }
+    const token = match[0];
+    const isKey = Boolean(match[3]);
+    const className = isKey
+      ? 'json-key'
+      : match[4]
+        ? 'json-literal'
+        : /^-?\d/.test(token)
+          ? 'json-number'
+          : token.startsWith('"')
+            ? 'json-string'
+            : 'json-punctuation';
+    const escapedToken = escapeHtml(token);
+    const renderedToken =
+      className === 'json-string' && !isKey
+        ? escapedToken.replaceAll('\\r\\n', '\n').replaceAll('\\n', '\n').replaceAll('\\r', '\n')
+        : escapedToken;
+    html += `<span class="${className}">${renderedToken}</span>`;
+    cursor = index + token.length;
+  }
+  if (cursor < value.length) {
+    html += escapeHtml(value.slice(cursor));
+  }
+  return html;
+}
+
+function formatJsonCodeBlockMarkup(value: string): string {
+  const normalized = value.trim();
+  if (!normalized || normalized === '(tuščia)' || normalized === '(nėra duomenų)') {
+    return escapeHtml(value);
+  }
+  try {
+    JSON.parse(normalized);
+    return highlightJsonForNotice(value);
+  } catch {
+    return escapeHtml(value);
+  }
+}
+
+function buildTechnicalNoticeMarkup(): string {
+  const result = latestCompileResult;
+  const syntaxLine =
+    result?.syntaxEngine === 'tree-sitter-wasm'
+      ? 'Tree-sitter C# (WASM) sintaksės analizatorius aktyvus.'
+      : 'WASM sintaksės analizatorius nepasiekiamas; taikoma atsarginė C# struktūros patikra.';
+  const modeLine =
+    result?.mode === 'wasm'
+      ? 'Pilnas tikrinimo režimas (WASM komponentai pasiekiami).'
+      : 'Atsarginis tikrinimo režimas (dalis WASM komponentų nepasiekiama).';
+  const statusLine = result?.success ? 'Kodas sukompiliuotas.' : 'Kodas nesikompiliuoja.';
+  const errorLine = result?.errors[0] ?? 'Nenurodyta.';
+  const details = latestRealCompilerDetails;
+  const requestHeadersPrettyRaw = details
+    ? prettyJsonOrRaw(JSON.stringify(details.requestHeaders ?? {}, null, 2))
+    : '(nėra duomenų)';
+  const requestBodyPrettyRaw = details ? prettyJsonOrRaw(details.requestBody) : '(nėra duomenų)';
+  const responseBodyPrettyRaw = details ? prettyJsonOrRaw(details.responseBody) : '(nėra duomenų)';
+  const requestHeadersPretty = formatJsonCodeBlockMarkup(requestHeadersPrettyRaw);
+  const requestBodyPretty = formatJsonCodeBlockMarkup(requestBodyPrettyRaw);
+  const responseBodyPretty = formatJsonCodeBlockMarkup(responseBodyPrettyRaw);
+  const checkedAt = details?.checkedAtIso ?? '(nežinoma)';
+  const endpoint = details?.endpoint?.trim() || '(nenurodytas)';
+  const method = details?.requestMethod ?? 'POST';
+  const responseStatus =
+    details?.responseStatus === null || details?.responseStatus === undefined
+      ? '(negautas)'
+      : `${details.responseStatus}`;
+
+  return [
+    '<div class="compile-notice-sections">',
+    '<p><strong>KODAS NESIKOMPILIUOJA</strong></p>',
+    '<p><strong>1) Sintaksės tikrinimas</strong><br>',
+    `${escapeHtml(syntaxLine)}<br>${escapeHtml(modeLine)}</p>`,
+    '<p><strong>2) Struktūros patikra</strong><br>',
+    'DanceRules klasė, skliaustai, enum nariai, AkiuSpalva().</p>',
+    '<p><strong>3) Individualios taisyklės</strong><br>',
+    'gerasLangas turi būti &gt;= tobulasLangas.</p>',
+    '<p><strong>4) Rezultatas</strong><br>',
+    `${escapeHtml(statusLine)}</p>`,
+    '<p><strong>5) Tikras C# kompiliatorius</strong><br>',
+    `${escapeHtml(latestRealCompilerNotice)}</p>`,
+    '<p><strong>6) Tikro C# kompiliatoriaus užklausos detalės</strong></p>',
+    '<p>',
+    `Tikrinta: ${escapeHtml(checkedAt)}<br>`,
+    `Endpoint: ${escapeHtml(endpoint)}<br>`,
+    `Užklausos metodas: ${escapeHtml(method)}<br>`,
+    `Atsakymo statusas: ${escapeHtml(responseStatus)}`,
+    '</p>',
+    '<p><strong>Užklausos antraštės (JSON)</strong></p>',
+    `<pre class="compile-notice-code">${requestHeadersPretty}</pre>`,
+    '<p><strong>Užklausa (JSON)</strong></p>',
+    `<pre class="compile-notice-code">${requestBodyPretty}</pre>`,
+    '<p><strong>Atsakymas (JSON)</strong></p>',
+    `<pre class="compile-notice-code">${responseBodyPretty}</pre>`,
+    '<p><strong>7) Klaida</strong><br>',
+    `${escapeHtml(errorLine)}</p>`,
+    '</div>',
+  ].join('');
+}
+
+function buildRealCompilerSummary(result: RealCompilerCheckResult): string {
+  if (result.kind === 'ok') {
+    return result.valid
+      ? `Tikras C# kompiliatorius (${result.compiler}): kodas kompiliuojasi.`
+      : `Tikras C# kompiliatorius (${result.compiler}): kodas NESIKOMPILIUOJA.`;
+  }
+  if (result.kind === 'aborted') {
+    return 'Tikras C# kompiliatoriaus tikrinimas nutrauktas.';
+  }
+  return `Tikras C# kompiliatorius nepasiekiamas: ${result.reason}`;
+}
+
+function buildRealCompilerDetailLines(details: RealCompilerDebugDetails): string[] {
+  return [
+    `Tikrinta: ${details.checkedAtIso}`,
+    `Endpoint: ${details.endpoint || '(nenurodytas)'}`,
+    `Užklausos metodas: ${details.requestMethod}`,
+    `Užklausos antraštės: ${JSON.stringify(details.requestHeaders)}`,
+    'Užklausa (siųstas turinys):',
+    details.requestBody || '(tuščia)',
+    `Atsakymo statusas: ${details.responseStatus === null ? '(negautas)' : details.responseStatus}`,
+    'Atsakymas (gautas turinys):',
+    details.responseBody && details.responseBody.trim().length > 0
+      ? details.responseBody
+      : '(tuščia)',
+  ];
+}
+
+function buildTechnicalCompileNoticeLines(): string[] {
+  const result = latestCompileResult;
+  const signature = JSON.stringify({
+    mode: result?.mode ?? null,
+    syntaxEngine: result?.syntaxEngine ?? null,
+    success: result?.success ?? null,
+    firstError: result?.errors?.[0] ?? null,
+    realCompiler: latestRealCompilerNotice,
+    realCompilerDetails: latestRealCompilerDetailLines.join('\n'),
+  });
+  if (cachedTechnicalNoticeLines !== null && cachedTechnicalNoticeSignature === signature) {
+    return cachedTechnicalNoticeLines;
+  }
+  const syntaxLine =
+    result?.syntaxEngine === 'tree-sitter-wasm'
+      ? 'Tree-sitter C# (WASM) sintaksės analizatorius aktyvus.'
+      : 'WASM sintaksės analizatorius nepasiekiamas; taikoma atsarginė C# struktūros patikra.';
+  const modeLine =
+    result?.mode === 'wasm'
+      ? 'Pilnas tikrinimo režimas (WASM komponentai pasiekiami).'
+      : 'Atsarginis tikrinimo režimas (dalis WASM komponentų nepasiekiama).';
+  const statusLine = result?.success ? 'Kodas sukompiliuotas.' : 'Kodas nesikompiliuoja.';
+  const errorLine = result?.errors[0] ?? 'Nenurodyta.';
+  cachedTechnicalNoticeSignature = signature;
+  cachedTechnicalNoticeLines = [
+    'KODAS NESIKOMPILIUOJA',
+    '',
+    '1) Sintaksės tikrinimas',
+    syntaxLine,
+    modeLine,
+    '',
+    '2) Struktūros patikra',
+    'DanceRules klasė, skliaustai, enum nariai, AkiuSpalva().',
+    '',
+    '3) Individualios taisyklės',
+    'gerasLangas turi būti >= tobulasLangas.',
+    '',
+    '4) Rezultatas',
+    statusLine,
+    '',
+    '5) Tikras C# kompiliatorius',
+    latestRealCompilerNotice,
+    '',
+    '6) Tikro C# kompiliatoriaus užklausos detalės',
+    ...latestRealCompilerDetailLines,
+    '',
+    '7) Klaida',
+    errorLine,
+  ];
+  return cachedTechnicalNoticeLines;
+}
+
+function useDesktopCompileNoticeRail(): boolean {
+  const coarsePointer = window.matchMedia('(pointer: coarse)').matches;
+  const anyCoarsePointer = window.matchMedia('(any-pointer: coarse)').matches;
+  const touchPoints = navigator.maxTouchPoints ?? 0;
+  const likelyMobileUa = /Android|webOS|iPhone|iPad|iPod|IEMobile|Opera Mini|Mobile/i.test(
+    navigator.userAgent,
+  );
+  if (coarsePointer || anyCoarsePointer || touchPoints > 0 || likelyMobileUa) {
+    return false;
+  }
+  const finePointer = window.matchMedia('(pointer: fine)').matches;
+  const hoverCapable = window.matchMedia('(hover: hover)').matches;
+  return finePointer && hoverCapable && window.innerWidth >= COMPILE_NOTICE_RAIL_MIN_WIDTH_PX;
+}
+
+function syncCompileNoticeRailLayout(): void {
+  if (!useDesktopCompileNoticeRail()) {
+    compileNoticeRailEl.style.removeProperty('--compile-rail-measured-width');
+    return;
+  }
+  const layoutEl = compileNoticeRailEl.parentElement;
+  const layoutStyle = layoutEl ? window.getComputedStyle(layoutEl) : null;
+  const leftInset = Number.parseFloat(layoutStyle?.paddingLeft ?? '0') || 0;
+  const gameRect = gameScreen.getBoundingClientRect();
+  const width = Math.floor(gameRect.left - leftInset - COMPILE_NOTICE_RAIL_CONTENT_GAP_PX);
+  const safeWidth = Math.max(0, width);
+  compileNoticeRailEl.style.setProperty('--compile-rail-measured-width', `${safeWidth}px`);
+}
+
+function shouldRenderWeatherCanvasTechnicalNoticePanel(): boolean {
+  return !useDesktopCompileNoticeRail();
+}
+
+function renderCompileNoticeRail(): void {
+  syncCompileNoticeRailLayout();
+  if (compileIsValid) {
+    compileNoticeRailEl.hidden = true;
+    compileNoticeToggleEl.setAttribute('aria-expanded', 'false');
+    return;
+  }
+
+  const showRail = useDesktopCompileNoticeRail();
+  compileNoticeRailEl.hidden = !showRail;
+  compileNoticeToggleEl.setAttribute('aria-expanded', technicalNoticeExpanded ? 'true' : 'false');
+  if (!showRail) {
+    return;
+  }
+  const fullLines = buildTechnicalCompileNoticeLines();
+  const compactLines = [fullLines[0] ?? 'KODAS NESIKOMPILIUOJA', 'DAR REIKIA PADIRBETI'];
+  if (technicalNoticeExpanded) {
+    compileNoticeTextEl.innerHTML = buildTechnicalNoticeMarkup();
+    return;
+  }
+  compileNoticeTextEl.textContent = compactLines.join('\n');
+}
+
+function renderHorseCompileNotice(): void {
+  if (compileIsValid) {
+    horseCompileNoticeEl.hidden = true;
+    horseCompileNoticeToggleEl.setAttribute('aria-expanded', 'false');
+    return;
+  }
+
+  const showNotice = true;
+  horseCompileNoticeEl.hidden = !showNotice;
+  horseCompileNoticeToggleEl.setAttribute(
+    'aria-expanded',
+    technicalNoticeExpanded ? 'true' : 'false',
+  );
+  if (!showNotice) {
+    return;
+  }
+  const fullLines = buildTechnicalCompileNoticeLines();
+  const compactLines = [fullLines[0] ?? 'KODAS NESIKOMPILIUOJA', 'DAR REIKIA PADIRBETI'];
+  if (technicalNoticeExpanded) {
+    horseCompileNoticeTextEl.innerHTML = buildTechnicalNoticeMarkup();
+    return;
+  }
+  horseCompileNoticeTextEl.textContent = compactLines.join('\n');
+}
+
+function isPointerInsideTechnicalIcon(
+  canvasEl: HTMLCanvasElement,
+  iconHit: TechnicalNoticeIconHit | null,
+  clientX: number,
+  clientY: number,
+): boolean {
+  if (!iconHit) {
+    return false;
+  }
+  const rect = canvasEl.getBoundingClientRect();
+  if (rect.width <= 0 || rect.height <= 0) {
+    return false;
+  }
+  const localX = clientX - rect.left;
+  const localY = clientY - rect.top;
+  const dx = localX - iconHit.x;
+  const dy = localY - iconHit.y;
+  const tapRadius = iconHit.r + 6;
+  return dx * dx + dy * dy <= tapRadius * tapRadius;
 }
 
 function setRules(next: DanceRules): void {
@@ -244,24 +1051,49 @@ function setRules(next: DanceRules): void {
   renderPuzzleProgress();
 }
 
-function readPuzzlesUnlocked(): boolean {
+function clampSolvedPuzzleCount(next: number): number {
+  const normalized = Number.isFinite(next) ? Math.trunc(next) : 0;
+  return Math.max(0, Math.min(CODE_PUZZLES.length, normalized));
+}
+
+function readSolvedPuzzleCount(): number {
   try {
-    return window.localStorage.getItem(PUZZLE_UNLOCK_STORAGE_KEY) === '1';
+    const raw = window.localStorage.getItem(PUZZLE_PROGRESS_STORAGE_KEY);
+    if (raw === null) {
+      return 0;
+    }
+    const parsed = Number.parseInt(raw, 10);
+    if (!Number.isFinite(parsed)) {
+      window.localStorage.removeItem(PUZZLE_PROGRESS_STORAGE_KEY);
+      return 0;
+    }
+
+    const clamped = clampSolvedPuzzleCount(parsed);
+    if (clamped <= 0) {
+      window.localStorage.removeItem(PUZZLE_PROGRESS_STORAGE_KEY);
+      return 0;
+    }
+
+    const normalized = `${clamped}`;
+    if (raw !== normalized) {
+      window.localStorage.setItem(PUZZLE_PROGRESS_STORAGE_KEY, normalized);
+    }
+    return clamped;
   } catch {
-    return false;
+    return 0;
   }
 }
 
-function writePuzzlesUnlocked(next: boolean): void {
-  puzzlesUnlocked = next;
+function writeSolvedPuzzleCount(next: number): void {
+  persistedSolvedPuzzleCount = clampSolvedPuzzleCount(next);
   try {
-    if (next) {
-      window.localStorage.setItem(PUZZLE_UNLOCK_STORAGE_KEY, '1');
-    } else {
-      window.localStorage.removeItem(PUZZLE_UNLOCK_STORAGE_KEY);
+    if (persistedSolvedPuzzleCount <= 0) {
+      window.localStorage.removeItem(PUZZLE_PROGRESS_STORAGE_KEY);
+      return;
     }
+    window.localStorage.setItem(PUZZLE_PROGRESS_STORAGE_KEY, `${persistedSolvedPuzzleCount}`);
   } catch {
-    // Ignore storage failures; gameplay still works in-memory.
+    // Ignore storage failures; mission progress still works in-memory.
   }
 }
 
@@ -308,15 +1140,13 @@ function formatInlineCode(value: string): string {
 
 function renderPuzzleProgress(): void {
   const progress = evaluatePuzzleProgress(rules, readEditorSource());
-  if (!puzzlesUnlocked && progress.nextPuzzle === null) {
-    writePuzzlesUnlocked(true);
+  const solvedCount = Math.max(progress.solvedCount, persistedSolvedPuzzleCount);
+  if (solvedCount > persistedSolvedPuzzleCount) {
+    writeSolvedPuzzleCount(solvedCount);
   }
-  const isUnlocked = puzzlesUnlocked;
-  const nextPuzzle = progress.nextPuzzle;
-  puzzleProgressEl.textContent = isUnlocked
-    ? `${progress.totalCount} / ${progress.totalCount}`
-    : `${progress.solvedCount} / ${progress.totalCount}`;
-  const allSolved = isUnlocked || nextPuzzle === null;
+  const nextPuzzle = CODE_PUZZLES[solvedCount] ?? null;
+  puzzleProgressEl.textContent = `${solvedCount} / ${progress.totalCount}`;
+  const allSolved = solvedCount >= progress.totalCount;
   templateRewardEl.hidden = !allSolved;
   templateLockNoteEl.hidden = allSolved;
 
@@ -332,16 +1162,16 @@ function renderPuzzleProgress(): void {
     return;
   }
 
-  puzzleStoryEl.textContent = `${nextPuzzle.titleLt}: ${nextPuzzle.storyLt}`;
-  puzzleGoalEl.textContent = `Tikslas: ${nextPuzzle.goalLt}`;
-  puzzleHintEl.innerHTML = formatInlineCode(`💡 Užuomina: ${nextPuzzle.hintLt}`);
+  puzzleStoryEl.innerHTML = `<span class="puzzle-label">${escapeHtml(nextPuzzle.titleLt)}:</span> ${escapeHtml(nextPuzzle.storyLt)}`;
+  puzzleGoalEl.innerHTML = `<span class="puzzle-label">🎯 Tikslas:</span> ${escapeHtml(nextPuzzle.goalLt)}`;
+  puzzleHintEl.innerHTML = `<span class="puzzle-label">💡 Užuomina:</span> ${formatInlineCode(nextPuzzle.hintLt)}`;
   puzzleDoneEl.hidden = true;
 }
 
 function wireAudioBootstrap(): void {
   audioBootstrapScope.disposeAll();
   if (audioRetryIntervalId !== null) {
-    window.clearInterval(audioRetryIntervalId);
+    clearTrackedInterval(window, audioRetryIntervalId);
     audioRetryIntervalId = null;
   }
 
@@ -354,20 +1184,22 @@ function wireAudioBootstrap(): void {
 
   // Retry while autoplay is active; if browser policy allows, audio starts
   // without waiting for explicit gameplay input.
-  audioRetryIntervalId = window.setInterval(() => {
-    if (!autoplayEnabled) {
-      return;
-    }
-    if (audio.isUnlocked()) {
-      return;
-    }
-    tryUnlock();
-  }, 900);
+  audioRetryIntervalId = setTrackedInterval(
+    window,
+    () => {
+      if (!autoplayEnabled) {
+        return;
+      }
+      if (audio.isUnlocked()) {
+        return;
+      }
+      tryUnlock();
+    },
+    900,
+  );
   audioBootstrapScope.add(() => {
-    if (audioRetryIntervalId !== null) {
-      window.clearInterval(audioRetryIntervalId);
-      audioRetryIntervalId = null;
-    }
+    clearTrackedInterval(window, audioRetryIntervalId);
+    audioRetryIntervalId = null;
   });
 
   // Policy-safe recovery hooks for browsers that require any user gesture.
@@ -394,12 +1226,12 @@ function teardownGame(): void {
   disposed = true;
 
   if (compileTimer !== null) {
-    window.clearTimeout(compileTimer);
+    clearTrackedTimeout(window, compileTimer);
     compileTimer = null;
   }
 
   if (audioRetryIntervalId !== null) {
-    window.clearInterval(audioRetryIntervalId);
+    clearTrackedInterval(window, audioRetryIntervalId);
     audioRetryIntervalId = null;
   }
   audioBootstrapScope.disposeAll();
@@ -410,9 +1242,11 @@ function teardownGame(): void {
   windowLifecycleScope.disposeAll();
   templateScope.disposeAll();
   editorResizeScope.disposeAll();
+  dangerZoneScope.disposeAll();
+  realCompilerScope.disposeAll();
 
   if (loopRafId !== null) {
-    window.cancelAnimationFrame(loopRafId);
+    cancelTrackedAnimationFrame(window, loopRafId);
     loopRafId = null;
   }
 
@@ -446,24 +1280,6 @@ function mountSimpleEditor(): void {
   if (!highlight) {
     return;
   }
-  const measureCtx = document.createElement('canvas').getContext('2d');
-
-  const estimateCharsPerVisualLine = (): number => {
-    const style = window.getComputedStyle(fallback);
-    const font = `${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-    if (measureCtx) {
-      measureCtx.font = font;
-    }
-
-    const sample = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    const sampleWidth = measureCtx?.measureText(sample).width ?? 434;
-    const avgCharWidth = Math.max(1, sampleWidth / sample.length);
-    const horizontalPadding =
-      Number.parseFloat(style.paddingLeft || '0') + Number.parseFloat(style.paddingRight || '0');
-    const availableWidth = Math.max(24, fallback.clientWidth - horizontalPadding);
-    return Math.max(1, Math.floor(availableWidth / avgCharWidth));
-  };
-
   let scrollSyncRafId: number | null = null;
   const syncOverlayScroll = (): void => {
     const fallbackTop = fallback.scrollTop;
@@ -475,23 +1291,35 @@ function mountSimpleEditor(): void {
   };
 
   const syncLines = (): void => {
-    lines.textContent = buildWrappedLineNumbers(fallback.value, estimateCharsPerVisualLine());
+    lines.textContent = buildWrappedLineNumbers(
+      fallback.value,
+      estimateFallbackCharsPerVisualLine(fallback),
+    );
     syncOverlayScroll();
   };
 
   const syncHighlight = (): void => {
-    highlight.innerHTML = `${highlightCSharp(fallback.value)}\n`;
+    const normalizedSource = fallback.value.endsWith('\n') ? fallback.value : `${fallback.value}\n`;
+    const overlaySource = `${normalizedSource}\u200b`;
+    highlight.innerHTML = highlightCSharp(overlaySource);
   };
 
-  wireFallbackCompiler(fallback, CSHARP_TEMPLATE, compiler, {
-    setRules: (next) => {
-      setRules(next);
-    },
-  });
+  editorScope.add(
+    wireFallbackCompiler(fallback, INITIAL_EDITOR_SOURCE, compiler, {
+      setRules: (next) => {
+        setRules(next);
+      },
+      setCompileValidity: (isValid, result) => {
+        setCompileValidityState(isValid, result);
+      },
+    }),
+  );
 
   readEditorSource = (): string => fallback.value;
   writeEditorSource = (next: string): void => {
-    fallback.value = next;
+    const normalized = ensureTrailingEmptyLine(next);
+    fallback.value = normalized;
+    persistEditorSource(normalized);
     syncLines();
     syncHighlight();
     fallback.dispatchEvent(new Event('input', { bubbles: true }));
@@ -503,35 +1331,50 @@ function mountSimpleEditor(): void {
 
   syncLines();
   syncHighlight();
-  const fallbackEventsAbort = new AbortController();
+  tryAutoSizeEditorPanelForInitialLoad();
+  growEditorPanelToFitFallbackContent(fallback);
+  requestTrackedAnimationFrame(window, () => {
+    stabilizeEditorPanelAutoSize(fallback);
+  });
+  syncLines();
+  syncHighlight();
+  const fallbackEventsAbort = createTrackedAbortController();
   const { signal } = fallbackEventsAbort;
-  fallback.addEventListener(
-    'input',
-    () => {
-      syncLines();
-      syncHighlight();
-    },
-    { signal },
+  editorScope.add(
+    bindTrackedEventListener(
+      fallback,
+      'input',
+      () => {
+        persistEditorSource(fallback.value);
+        growEditorPanelToFitFallbackContent(fallback);
+        syncLines();
+        syncHighlight();
+      },
+      { signal },
+    ),
   );
-  fallback.addEventListener(
-    'scroll',
-    () => {
-      if (scrollSyncRafId !== null) {
-        return;
-      }
-      scrollSyncRafId = window.requestAnimationFrame(() => {
-        scrollSyncRafId = null;
-        syncOverlayScroll();
-      });
-    },
-    { passive: true, signal },
+  editorScope.add(
+    bindTrackedEventListener(
+      fallback,
+      'scroll',
+      () => {
+        if (scrollSyncRafId !== null) {
+          return;
+        }
+        scrollSyncRafId = requestTrackedAnimationFrame(window, () => {
+          scrollSyncRafId = null;
+          syncOverlayScroll();
+        });
+      },
+      { passive: true, signal },
+    ),
   );
   editorScope.add(() => {
     fallbackEventsAbort.abort();
   });
   editorScope.add(() => {
     if (scrollSyncRafId !== null) {
-      window.cancelAnimationFrame(scrollSyncRafId);
+      cancelTrackedAnimationFrame(window, scrollSyncRafId);
       scrollSyncRafId = null;
     }
   });
@@ -569,6 +1412,51 @@ function wireTemplateButtons(): void {
   });
 }
 
+function wireRealCompilerCheck(): void {
+  realCompilerScope.disposeAll();
+  let activeController: AbortController | null = null;
+
+  const runCheck = async (): Promise<void> => {
+    activeController?.abort();
+    const controller = createTrackedAbortController();
+    activeController = controller;
+    realCompilerCheckButtonEl.disabled = true;
+    const checkingText = 'Tikras C# kompiliatorius tikrina kodą...';
+    realCompilerStatusEl.textContent = checkingText;
+    setRealCompilerNotice(checkingText, ['Užklausa siunčiama...']);
+
+    const result = await checkWithRealCompiler(readEditorSource(), { signal: controller.signal });
+    if (activeController !== controller) {
+      return;
+    }
+    activeController = null;
+    realCompilerCheckButtonEl.disabled = false;
+
+    const summary = buildRealCompilerSummary(result);
+    const details = buildRealCompilerDetailLines(result.details);
+    if (result.kind === 'ok') {
+      const diagnosticsText =
+        result.diagnostics.length > 0
+          ? `\nKlaidos:\n${result.diagnostics.join('\n')}`
+          : '\nKlaidų nerasta.';
+      realCompilerStatusEl.textContent = `${summary}${diagnosticsText}`;
+    } else {
+      realCompilerStatusEl.textContent = summary;
+    }
+    setRealCompilerNotice(summary, details, result.details);
+  };
+
+  realCompilerScope.add(
+    bindElementClick(realCompilerCheckButtonEl, () => {
+      void runCheck();
+    }),
+  );
+  realCompilerScope.add(() => {
+    activeController?.abort();
+    activeController = null;
+  });
+}
+
 function updateHud(score: number, streak: number, judgement: string): void {
   scoreEl.textContent = `${score}`;
   streakEl.textContent = `${streak}`;
@@ -595,6 +1483,24 @@ function fitHudValuesToBox(): void {
   fitHudValueToBox(streakEl);
   fitHudValueToBox(multiplierEl);
   fitHudValueToBox(judgementEl);
+}
+
+function fitToggleButtonLabelToBox(el: HTMLButtonElement): void {
+  let sizePx = TOGGLE_LABEL_MAX_FONT_PX;
+  el.style.fontSize = `${sizePx}px`;
+
+  while (
+    (el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight) &&
+    sizePx > TOGGLE_LABEL_MIN_FONT_PX
+  ) {
+    sizePx -= 0.5;
+    el.style.fontSize = `${sizePx}px`;
+  }
+}
+
+function fitToggleButtonLabelsToBox(): void {
+  fitToggleButtonLabelToBox(autoplayToggleEl);
+  fitToggleButtonLabelToBox(muteToggleEl);
 }
 
 function renderLanes(nowSec: number): void {
@@ -637,7 +1543,11 @@ function renderLanes(nowSec: number): void {
     })
     .join('');
 
-  laneHighwayEl.innerHTML = pendingMarkup + activeHoldMarkup;
+  const nextMarkup = pendingMarkup + activeHoldMarkup;
+  if (nextMarkup !== lastLaneMarkup) {
+    laneHighwayEl.innerHTML = nextMarkup;
+    lastLaneMarkup = nextMarkup;
+  }
 }
 
 function readJsHeapMb(): number | null {
@@ -652,10 +1562,67 @@ function readJsHeapMb(): number | null {
   return used / (1024 * 1024);
 }
 
+function estimateLocalStorageBytes(): number {
+  try {
+    const storage = window.localStorage;
+    let usedChars = 0;
+    for (let i = 0; i < storage.length; i += 1) {
+      const key = storage.key(i);
+      if (!key) {
+        continue;
+      }
+      const value = storage.getItem(key) ?? '';
+      usedChars += key.length + value.length;
+    }
+    return usedChars * 2;
+  } catch {
+    return 0;
+  }
+}
+
+function estimateRuntimeMemoryBytes(): number {
+  const nowSec = performance.now() / 1000;
+  const trackedBeats = engine.getBeatsInRange(nowSec - 8, nowSec + 8, true).length;
+  const horseStats = horseAnimator.getRuntimeStats();
+  const audioStats = audio.readRuntimeStats();
+  const editorSourceChars = readEditorSource().length;
+  const domNodeCount = document.getElementsByTagName('*').length;
+
+  let bytes = 0;
+  // Canvas backbuffers are usually RGBA (4 bytes per pixel).
+  bytes += canvas.width * canvas.height * 4;
+  bytes += weatherSceneCanvas.width * weatherSceneCanvas.height * 4;
+  bytes += audioVisualizerEl.width * audioVisualizerEl.height * 4;
+  // Core gameplay runtime objects (rough model).
+  bytes += trackedBeats * 72;
+  bytes += lastVisibleNoteCount * 96;
+  bytes += activeHolds.size * 80;
+  bytes += pendingSongBeats.size * 96;
+  bytes += autoPlayedBeatIds.size * 16;
+  bytes += songPlayedBeatIds.size * 16;
+  bytes += autoHeldLanes.size * 16;
+  bytes += pressedLanes.size * 16;
+  bytes += keyHeldLanes.size * 16;
+  bytes += horseStats.noteParticles * 112;
+  bytes += (audioStats.activeTransientVoices + audioStats.activeHoldVoices) * 256;
+  // Text/markup and persistent payloads.
+  bytes += lastLaneMarkup.length * 2;
+  bytes += editorSourceChars * 2;
+  bytes += estimateLocalStorageBytes();
+  // Coarse DOM allocation estimate.
+  bytes += domNodeCount * 160;
+
+  return Math.max(0, Math.round(bytes));
+}
+
 async function sampleMemoryText(): Promise<string> {
+  const estimatedBytes = estimateRuntimeMemoryBytes();
+  const estimatedMb = estimatedBytes / (1024 * 1024);
+  const estimatedText = `${estimatedMb.toFixed(1)}MB (įvertis)`;
+
   const heapMb = readJsHeapMb();
   if (heapMb !== null) {
-    return `${heapMb.toFixed(1)}MB`;
+    return `${heapMb.toFixed(1)}MB (naršyklė), ${estimatedText}`;
   }
 
   const perf = performance as Performance & {
@@ -666,14 +1633,14 @@ async function sampleMemoryText(): Promise<string> {
       const result = await perf.measureUserAgentSpecificMemory();
       const mb = result.bytes / (1024 * 1024);
       if (!Number.isNaN(mb) && Number.isFinite(mb)) {
-        return `${mb.toFixed(1)}MB`;
+        return `${mb.toFixed(1)}MB (naršyklė), ${estimatedText}`;
       }
     } catch {
       // Ignore; we still provide a clear fallback label below.
     }
   }
 
-  return 'neprieinama (naršyklė nerodo)';
+  return estimatedText;
 }
 
 function formatStorageBytes(bytes: number): string {
@@ -688,7 +1655,26 @@ function formatStorageBytes(bytes: number): string {
   return `${Math.round(bytes / 1024)} KB`;
 }
 
-function readLocalStorageDebugLines(): string[] {
+function summarizeEditorSourceValue(source: string): string {
+  const normalized = source.replace(/\r\n/g, '\n').replace(/\n+$/g, '');
+  const lineCount = normalized.length === 0 ? 0 : normalized.split('\n').length;
+  return `eilučių skaičius: ${lineCount}`;
+}
+
+function formatOwnStorageValue(key: string, value: string | null): string {
+  if (value === null) {
+    return 'nėra';
+  }
+  if (key === EDITOR_SOURCE_STORAGE_KEY) {
+    return summarizeEditorSourceValue(value);
+  }
+  if (value.length === 0) {
+    return '(tuščia)';
+  }
+  return value;
+}
+
+function readLocalStorageDebugStats(): LocalStorageDebugStats {
   try {
     const storage = window.localStorage;
     const keyCount = storage.length;
@@ -703,36 +1689,43 @@ function readLocalStorageDebugLines(): string[] {
     }
     const usedBytesApprox = usedChars * 2;
 
-    const ownPairs = LOCAL_STORAGE_KEYS_USED.map((key) => {
-      const value = storage.getItem(key);
-      return `${key}=${value === null ? 'nėra' : value}`;
-    });
-    const ownPresentCount = ownPairs.reduce(
-      (count, pair) => (pair.endsWith('=nėra') ? count : count + 1),
+    const ownKeyValues = LOCAL_STORAGE_KEYS_USED.map((key) =>
+      formatOwnStorageValue(key, storage.getItem(key)),
+    );
+    const ownPresentCount = ownKeyValues.reduce(
+      (count, value) => (value === 'nėra' ? count : count + 1),
       0,
     );
 
-    return [
-      'Vietinė saugykla: prieinama',
-      `Raktų kiekis: ${keyCount}`,
-      `Mūsų raktai: ${ownPresentCount}/${LOCAL_STORAGE_KEYS_USED.length}`,
-      `Mūsų reikšmės: ${ownPairs.join(' | ')}`,
-      `Užimta (apytiksliai): ${formatStorageBytes(usedBytesApprox)}`,
-    ];
+    return {
+      availability: 'prieinama',
+      keyCount: `${keyCount}`,
+      ownKeys: `${ownPresentCount}/${LOCAL_STORAGE_KEYS_USED.length}`,
+      ownKeyValues,
+      approxUsed: formatStorageBytes(usedBytesApprox),
+      browserStorage: 'neprieinama',
+    };
   } catch (error) {
     const reason = error instanceof Error && error.message ? error.message : 'klaida';
-    return [`Vietinė saugykla: neprieinama (${reason})`];
+    return {
+      availability: `neprieinama (${reason})`,
+      keyCount: 'neprieinama',
+      ownKeys: 'neprieinama',
+      ownKeyValues: LOCAL_STORAGE_KEYS_USED.map(() => 'neprieinama'),
+      approxUsed: 'neprieinama',
+      browserStorage: 'neprieinama',
+    };
   }
 }
 
-async function sampleLocalStorageLines(): Promise<string[]> {
-  const lines = readLocalStorageDebugLines();
+async function sampleLocalStorageStats(): Promise<LocalStorageDebugStats> {
+  const stats = readLocalStorageDebugStats();
   const navigatorWithStorage = navigator as Navigator & {
     storage?: { estimate?: () => Promise<{ usage?: number; quota?: number }> };
   };
   const estimateFn = navigatorWithStorage.storage?.estimate;
   if (typeof estimateFn !== 'function') {
-    return lines;
+    return stats;
   }
 
   try {
@@ -741,15 +1734,18 @@ async function sampleLocalStorageLines(): Promise<string[]> {
       typeof estimate.usage === 'number' ? formatStorageBytes(estimate.usage) : 'neprieinama';
     const quota =
       typeof estimate.quota === 'number' ? formatStorageBytes(estimate.quota) : 'neprieinama';
-    lines.push(`Naršyklės saugykla: ${usage} / ${quota}`);
+    stats.browserStorage = `${usage} / ${quota}`;
   } catch {
-    lines.push('Naršyklės saugykla: neprieinama');
+    stats.browserStorage = 'neprieinama';
   }
 
-  return lines;
+  return stats;
 }
 
 function queuePerformanceSamples(nowMs: number): void {
+  if (!perfStackEl.open) {
+    return;
+  }
   if (perfMemorySampleInFlight) {
     return;
   }
@@ -759,14 +1755,135 @@ function queuePerformanceSamples(nowMs: number): void {
 
   perfLastMemorySampleMs = nowMs;
   perfMemorySampleInFlight = true;
-  void Promise.all([sampleMemoryText(), sampleLocalStorageLines()])
+  void Promise.all([sampleMemoryText(), sampleLocalStorageStats()])
     .then(([nextMemory, nextStorage]) => {
       perfMemoryText = nextMemory;
-      perfLocalStorageLines = nextStorage;
+      perfLocalStorageStats = nextStorage;
     })
     .finally(() => {
       perfMemorySampleInFlight = false;
     });
+}
+
+function formatStatValue(value: string): string {
+  if (value.trim() === 'tikrinama...') {
+    return '<span class="perf-stats-placeholder"><span class="perf-stats-placeholder-dot" aria-hidden="true"></span><span class="perf-stats-placeholder-text">tikrinama...</span></span>';
+  }
+  return escapeHtml(value);
+}
+
+function isMobilePerformanceMode(): boolean {
+  return IS_COARSE_POINTER && window.innerWidth <= MOBILE_PERF_MAX_WIDTH_PX;
+}
+
+function summarizeRepoBloatSignal(stats: BuildGitRepoStats): string {
+  if (!stats.available) {
+    return 'neprieinama';
+  }
+  const churnBytes = stats.historyChurn.reduce((sum, entry) => sum + entry.totalBytes, 0);
+  if (stats.gitDirBytes < 10 * 1024 * 1024 && churnBytes < 5 * 1024 * 1024) {
+    return 'žemas';
+  }
+  if (stats.gitDirBytes < 30 * 1024 * 1024 && churnBytes < 15 * 1024 * 1024) {
+    return 'vidutinis';
+  }
+  return 'aukštas';
+}
+
+function buildGitDiagnosticsLines(): string[] {
+  const stats = __GIT_REPO_STATS__;
+  if (!stats.available) {
+    return [
+      'Git (repo): neprieinama',
+      `Git klaida: ${stats.error ?? 'nežinoma'}`,
+      'Repo bloat signalas: neprieinama',
+    ];
+  }
+
+  const lines = [
+    `Git šaka: ${stats.branch}`,
+    `Git commit: ${stats.commit}`,
+    `Sekami failai: ${stats.trackedFileCount}`,
+    `Git metaduomenų dydis (.git): ${formatStorageBytes(stats.gitDirBytes)}`,
+    `Git objektų kiekis: ${stats.gitObjectCount ?? 'neprieinama'}`,
+    `Git objektų vieta (loose/pack): ${stats.gitLooseSizeBytes === null || stats.gitPackSizeBytes === null ? 'neprieinama' : `${formatStorageBytes(stats.gitLooseSizeBytes)} / ${formatStorageBytes(stats.gitPackSizeBytes)}`}`,
+    'Didžiausi sekami failai (dabar):',
+    ...stats.largestTrackedFiles.map(
+      (entry) => `  - ${entry.path}=${formatStorageBytes(entry.bytes)}`,
+    ),
+    'Didžiausias istorijos churn (per blob versijas):',
+    ...stats.historyChurn.map(
+      (entry) =>
+        `  - ${entry.path}=${formatStorageBytes(entry.totalBytes)} per ${entry.blobCount} blob vers.`,
+    ),
+    `Repo bloat signalas: ${summarizeRepoBloatSignal(stats)}`,
+  ];
+
+  return lines;
+}
+
+function renderPerformanceStatsPanel(
+  fpsText: string,
+  frameTimeText: string,
+  noteCountText: string,
+  particleCountText: string,
+  activeTransientVoicesText: string,
+  activeHoldVoicesText: string,
+  visualCapText: string,
+): void {
+  const resourceStats = readResourceStatsSnapshot();
+  const perfLines = [
+    `Našumas: ${fpsText}`,
+    `Kadro laikas: ${frameTimeText}`,
+    `Atmintis: ${perfMemoryText}`,
+    `Natos: ${noteCountText}`,
+    `Dalelės: ${particleCountText}`,
+    `Garso balsai: ${activeTransientVoicesText}`,
+    `Laikomos natos: ${activeHoldVoicesText}`,
+    `Vizualo riba: ${visualCapText}`,
+    `Vietinė saugykla: ${perfLocalStorageStats.availability}`,
+    `Raktų kiekis: ${perfLocalStorageStats.keyCount}`,
+    `Mūsų raktai: ${perfLocalStorageStats.ownKeys}`,
+    'Mūsų raktų būsena:',
+    ...LOCAL_STORAGE_KEYS_USED.map((key, index) => {
+      const value = perfLocalStorageStats.ownKeyValues[index] ?? 'tikrinama...';
+      return `  - ${key}=${value}`;
+    }),
+    `Užimta (apytiksliai): ${perfLocalStorageStats.approxUsed}`,
+    `Naršyklės saugykla: ${perfLocalStorageStats.browserStorage}`,
+    'Resursų sekimas:',
+    `Aktyvūs įvykio klausytojai: ${resourceStats.activeEventListeners} (pikas: ${resourceStats.peakEventListeners})`,
+    `Aktyvūs timeout: ${resourceStats.activeTimeouts} (pikas: ${resourceStats.peakTimeouts})`,
+    `Aktyvūs interval: ${resourceStats.activeIntervals} (pikas: ${resourceStats.peakIntervals})`,
+    `Aktyvūs requestAnimationFrame: ${resourceStats.activeRafs} (pikas: ${resourceStats.peakRafs})`,
+    `Aktyvūs AbortController: ${resourceStats.activeAbortControllers} (pikas: ${resourceStats.peakAbortControllers})`,
+    `Aktyvūs ResizeObserver: ${resourceStats.activeResizeObservers} (pikas: ${resourceStats.peakResizeObservers})`,
+    `Aktyvūs sintaksės medžiai: ${resourceStats.activeSyntaxTrees} (pikas: ${resourceStats.peakSyntaxTrees})`,
+    'Git diagnostika:',
+    ...buildGitDiagnosticsLines(),
+  ];
+  const formatStatLine = (line: string): string => {
+    if (line.startsWith('  - ')) {
+      const entry = line.slice(4);
+      const equalsIndex = entry.indexOf('=');
+      if (equalsIndex === -1) {
+        return `&nbsp;&nbsp;- <strong>${escapeHtml(entry)}</strong>`;
+      }
+      const key = entry.slice(0, equalsIndex);
+      const value = entry.slice(equalsIndex + 1);
+      return `&nbsp;&nbsp;- <strong>${escapeHtml(key)}</strong>=${formatStatValue(value)}`;
+    }
+    const labelEnd = line.indexOf(':');
+    if (labelEnd <= 0) {
+      return escapeHtml(line);
+    }
+    const label = line.slice(0, labelEnd);
+    const value = line.slice(labelEnd + 1);
+    return `<strong>${escapeHtml(label)}:</strong>${formatStatValue(value)}`;
+  };
+  const statLines = perfLines.map((line) => formatStatLine(line));
+  const creditsLine = escapeHtml(FOOTER_CREDITS_LINE);
+  perfStatsEl.innerHTML = `<br>${statLines.join('<br>')}<br><strong>GitHub:</strong> <a href="${REPO_URL}" target="_blank" rel="noopener noreferrer">${REPO_URL}</a><br><br>${creditsLine}`;
 }
 
 function updatePerformanceStats(nowMs: number): void {
@@ -784,46 +1901,129 @@ function updatePerformanceStats(nowMs: number): void {
 
   const fps = perfFrameCount / (windowMs / 1000);
   const avgFrameMs = perfFrameCount > 0 ? perfFrameMsTotal / perfFrameCount : 0;
+  latestMeasuredFps = fps;
+  latestMeasuredFrameMs = avgFrameMs;
+  if (!perfStackEl.open) {
+    perfWindowStartMs = nowMs;
+    perfFrameCount = 0;
+    perfFrameMsTotal = 0;
+    return;
+  }
   const audioStats = audio.readRuntimeStats();
   const horseStats = horseAnimator.getRuntimeStats();
-  const visualCap = IS_COARSE_POINTER ? (autoplayEnabled ? 36 : 45) : 60;
-
-  const perfLines = [
-    `Našumas: ${fps.toFixed(1)} kadr./s`,
-    `Kadro laikas: ${avgFrameMs.toFixed(1)} ms`,
-    `Atmintis: ${perfMemoryText}`,
-    `Natos: ${lastVisibleNoteCount}`,
-    `Dalelės: ${horseStats.noteParticles}`,
-    `Garso balsai: ${audioStats.activeTransientVoices}`,
-    `Laikomos natos: ${audioStats.activeHoldVoices}`,
-    `Vizualo riba: ${visualCap} kadr./s`,
-  ];
-  const statLines = [...perfLines, ...perfLocalStorageLines].map((line) => escapeHtml(line));
-  const creditsLine = escapeHtml(FOOTER_CREDITS_LINE);
-  perfStatsEl.innerHTML = `${statLines.join('<br>')}<br>GitHub: <a href="${REPO_URL}" target="_blank" rel="noopener noreferrer">${REPO_URL}</a><br>${creditsLine}`;
+  const visualCap = isMobilePerformanceMode() ? (autoplayEnabled ? 36 : 45) : 60;
+  renderPerformanceStatsPanel(
+    `${fps.toFixed(1)} kadr./s`,
+    `${avgFrameMs.toFixed(1)} ms`,
+    `${lastVisibleNoteCount}`,
+    `${horseStats.noteParticles}`,
+    `${audioStats.activeTransientVoices}`,
+    `${audioStats.activeHoldVoices}`,
+    `${visualCap} kadr./s`,
+  );
 
   perfWindowStartMs = nowMs;
   perfFrameCount = 0;
   perfFrameMsTotal = 0;
 }
 
+renderPerformanceStatsPanel(
+  'tikrinama...',
+  'tikrinama...',
+  'tikrinama...',
+  'tikrinama...',
+  'tikrinama...',
+  'tikrinama...',
+  `${isMobilePerformanceMode() ? 36 : 60} kadr./s`,
+);
+
 function renderAutoplayUiState(): void {
-  autoplayToggleEl.textContent = `Žaisti automatiškai: ${autoplayEnabled ? 'TAIP' : 'NE'}`;
+  autoplayToggleEl.innerHTML = `<span class="toggle-label">Žaisti automatiškai:</span><span class="toggle-state ${autoplayEnabled ? 'on' : 'off'}">${autoplayEnabled ? 'TAIP' : 'NE'}</span>`;
   autoplayOverlayEl.classList.toggle('show', autoplayEnabled);
+  fitToggleButtonLabelsToBox();
 }
 
 function renderSoundUiState(): void {
-  muteToggleEl.textContent = `Garsas: ${soundMuted ? 'IŠJUNGTAS' : 'ĮJUNGTAS'}`;
+  const soundOn = !soundMuted;
+  muteToggleEl.innerHTML = `<span class="toggle-label">Garsas:</span><span class="toggle-state ${soundOn ? 'on' : 'off'}">${soundOn ? 'ĮJUNGTAS' : 'IŠJUNGTAS'}</span>`;
+  fitToggleButtonLabelsToBox();
+}
+
+function shouldRenderFrameWithCadence(
+  timeMs: number,
+  lastRenderMs: number,
+  targetFps: number,
+): number | null {
+  const minFrameIntervalMs = 1000 / targetFps;
+  const elapsedMs = timeMs - lastRenderMs;
+  if (elapsedMs + 0.4 < minFrameIntervalMs) {
+    return null;
+  }
+  if (lastRenderMs <= 0 || elapsedMs > minFrameIntervalMs * 2.5) {
+    return timeMs;
+  }
+  return lastRenderMs + minFrameIntervalMs;
 }
 
 function shouldRenderVisualFrame(timeMs: number): boolean {
-  const targetVisualFps = IS_COARSE_POINTER ? (autoplayEnabled ? 36 : 45) : 60;
-  const minFrameIntervalMs = 1000 / targetVisualFps;
-  if (timeMs - lastVisualRenderMs < minFrameIntervalMs) {
+  if (!isMobilePerformanceMode()) {
+    lastVisualRenderMs = timeMs;
+    return true;
+  }
+  const targetVisualFps = autoplayEnabled ? 36 : 45;
+  const nextRenderMs = shouldRenderFrameWithCadence(timeMs, lastVisualRenderMs, targetVisualFps);
+  if (nextRenderMs === null) {
     return false;
   }
+  lastVisualRenderMs = nextRenderMs;
+  return true;
+}
 
-  lastVisualRenderMs = timeMs;
+function shouldRenderWeatherSceneFrame(timeMs: number): boolean {
+  const targetWeatherFps = isMobilePerformanceMode()
+    ? WEATHER_VISUAL_FPS_COARSE
+    : WEATHER_VISUAL_FPS_FINE;
+  const nextRenderMs = shouldRenderFrameWithCadence(timeMs, lastWeatherRenderMs, targetWeatherFps);
+  if (nextRenderMs === null) {
+    return false;
+  }
+  lastWeatherRenderMs = nextRenderMs;
+  return true;
+}
+
+function shouldRenderAudioVisualizerFrame(timeMs: number): boolean {
+  const targetAudioVizFps = isMobilePerformanceMode() ? AUDIO_VIZ_FPS_COARSE : AUDIO_VIZ_FPS_FINE;
+  const nextRenderMs = shouldRenderFrameWithCadence(
+    timeMs,
+    lastAudioVizRenderMs,
+    targetAudioVizFps,
+  );
+  if (nextRenderMs === null) {
+    return false;
+  }
+  lastAudioVizRenderMs = nextRenderMs;
+  return true;
+}
+
+function shouldRenderHorseFrame(timeMs: number): boolean {
+  const targetHorseFps = isMobilePerformanceMode()
+    ? HORSE_VISUAL_FPS_COARSE
+    : HORSE_VISUAL_FPS_FINE;
+  const nextRenderMs = shouldRenderFrameWithCadence(timeMs, lastHorseRenderMs, targetHorseFps);
+  if (nextRenderMs === null) {
+    return false;
+  }
+  lastHorseRenderMs = nextRenderMs;
+  return true;
+}
+
+function shouldRenderLaneFrame(timeMs: number): boolean {
+  const targetLaneFps = isMobilePerformanceMode() ? LANE_VISUAL_FPS_COARSE : LANE_VISUAL_FPS_FINE;
+  const nextRenderMs = shouldRenderFrameWithCadence(timeMs, lastLaneRenderMs, targetLaneFps);
+  if (nextRenderMs === null) {
+    return false;
+  }
+  lastLaneRenderMs = nextRenderMs;
   return true;
 }
 
@@ -845,22 +2045,6 @@ function showJudgementFeedback(
   displayText: string,
   lane: number | null,
 ): void {
-  const spawnPerfectBurst = (laneButton: HTMLButtonElement): void => {
-    const burst = document.createElement('div');
-    burst.className = 'perfect-burst';
-    for (let i = 0; i < 10; i += 1) {
-      const spark = document.createElement('span');
-      spark.className = 'spark';
-      spark.style.setProperty('--a', `${(360 / 10) * i}deg`);
-      spark.style.setProperty('--d', `${18 + (i % 3) * 7}px`);
-      burst.appendChild(spark);
-    }
-    laneButton.appendChild(burst);
-    window.setTimeout(() => {
-      burst.remove();
-    }, 380);
-  };
-
   judgementPopEl.textContent = displayText;
   judgementPopEl.classList.remove('show', 'tobula', 'gerai', 'praleista');
   if (judgement === 'TOBULA') {
@@ -871,9 +2055,13 @@ function showJudgementFeedback(
     judgementPopEl.classList.add('praleista');
   }
   judgementPopEl.classList.add('show');
-  window.setTimeout(() => {
-    judgementPopEl.classList.remove('show');
-  }, 180);
+  setTrackedTimeout(
+    window,
+    () => {
+      judgementPopEl.classList.remove('show');
+    },
+    180,
+  );
 
   if (lane !== null) {
     const laneButton = document.querySelector<HTMLButtonElement>(
@@ -881,10 +2069,7 @@ function showJudgementFeedback(
     );
     if (laneButton) {
       laneButton.classList.add('hit');
-      window.setTimeout(() => laneButton.classList.remove('hit'), 120);
-      if (judgement === 'TOBULA') {
-        spawnPerfectBurst(laneButton);
-      }
+      setTrackedTimeout(window, () => laneButton.classList.remove('hit'), 120);
     }
   }
 }
@@ -908,11 +2093,58 @@ function resizeCanvas(): void {
   canvas.width = metrics.canvasWidth;
   canvas.height = metrics.canvasHeight;
   ctx.setTransform(metrics.dpr, 0, 0, metrics.dpr, 0, 0);
+
+  const sceneCssWidth = Math.max(1, Math.floor(window.innerWidth));
+  const sceneCssHeight = Math.max(1, Math.floor(window.innerHeight));
+  const nativeSceneDpr = window.devicePixelRatio || 1;
+  const scenePixelLimitScale = Math.sqrt(
+    WEATHER_SCENE_MAX_PIXELS / Math.max(1, sceneCssWidth * sceneCssHeight),
+  );
+  const sceneDprCap = Number.isFinite(scenePixelLimitScale)
+    ? scenePixelLimitScale
+    : WEATHER_SCENE_MAX_DPR;
+  const sceneDpr = Math.max(0.85, Math.min(nativeSceneDpr, WEATHER_SCENE_MAX_DPR, sceneDprCap));
+  weatherSceneCanvas.style.width = `${sceneCssWidth}px`;
+  weatherSceneCanvas.style.height = `${sceneCssHeight}px`;
+  weatherSceneCanvas.width = Math.floor(sceneCssWidth * sceneDpr);
+  weatherSceneCanvas.height = Math.floor(sceneCssHeight * sceneDpr);
+  weatherSceneDpr = sceneDpr;
+  weatherSceneCtx.setTransform(sceneDpr, 0, 0, sceneDpr, 0, 0);
+  renderBackgroundWeatherScene(
+    performance.now() / 1000,
+    latestVisualizerBars,
+    compileIsValid ? [] : buildTechnicalCompileNoticeLines(),
+  );
+  renderCompileNoticeRail();
+  renderHorseCompileNotice();
+
   fitHudValuesToBox();
+  fitToggleButtonLabelsToBox();
   resizeAudioVisualizer();
 }
 
-resizeCanvas();
+function stabilizeCanvasSizing(remainingFrames = 8): void {
+  if (canvasStabilizeRafId !== null) {
+    cancelTrackedAnimationFrame(window, canvasStabilizeRafId);
+    canvasStabilizeRafId = null;
+  }
+
+  resizeCanvas();
+  if (remainingFrames <= 0) {
+    return;
+  }
+
+  canvasStabilizeRafId = requestTrackedAnimationFrame(window, () => {
+    stabilizeCanvasSizing(remainingFrames - 1);
+  });
+}
+
+stabilizeCanvasSizing();
+renderBackgroundWeatherScene(
+  performance.now() / 1000,
+  latestVisualizerBars,
+  compileIsValid ? [] : buildTechnicalCompileNoticeLines(),
+);
 function resizeAudioVisualizer(): void {
   const cssWidth = Math.max(180, Math.floor(audioVisualizerEl.clientWidth));
   const cssHeight = 54;
@@ -922,17 +2154,24 @@ function resizeAudioVisualizer(): void {
   audioVizCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
 }
 
-function renderAudioVisualizer(): void {
+function renderAudioVisualizer(snapshot?: { bars: number[] }): void {
+  if (!perfStackEl.open) {
+    return;
+  }
   const width = Math.max(1, Math.floor(audioVisualizerEl.width / (window.devicePixelRatio || 1)));
   const height = Math.max(1, Math.floor(audioVisualizerEl.height / (window.devicePixelRatio || 1)));
-  const snapshot = audio.sampleVisualizer(52);
-  const { bars } = snapshot;
+  const visualizerSnapshot = snapshot ?? audio.sampleVisualizer(52);
+  const { bars } = visualizerSnapshot;
   const gap = 1;
   const horizontalInset = 2;
   const innerWidth = Math.max(1, width - horizontalInset * 2);
   const barWidth = Math.max(1, Math.floor((innerWidth - (bars.length - 1) * gap) / bars.length));
   const contentWidth = bars.length * barWidth + (bars.length - 1) * gap;
   const startX = horizontalInset + Math.max(0, Math.floor((innerWidth - contentWidth) / 2));
+  if (startX !== lastPerfStatsIndentPx) {
+    lastPerfStatsIndentPx = startX;
+    perfStatsEl.style.paddingLeft = `${startX}px`;
+  }
 
   audioVizCtx.clearRect(0, 0, width, height);
   audioVizCtx.fillStyle = 'rgba(255, 245, 226, 0.85)';
@@ -948,9 +2187,57 @@ function renderAudioVisualizer(): void {
     audioVizCtx.fillRect(x, baseY - barHeight, barWidth, barHeight);
   }
 }
+
+function renderBackgroundWeatherScene(
+  nowSec: number,
+  technicalWaveformBars: readonly number[],
+  technicalNoticeLines: readonly string[],
+): void {
+  const sceneWidth = Math.max(
+    1,
+    Math.floor(weatherSceneCanvas.width / Math.max(0.01, weatherSceneDpr)),
+  );
+  const sceneHeight = Math.max(
+    1,
+    Math.floor(weatherSceneCanvas.height / Math.max(0.01, weatherSceneDpr)),
+  );
+  const sceneMode: WeatherSceneRenderMode = compileIsValid ? 'normal' : 'technical-test';
+  const showTechnicalNoticePanel = shouldRenderWeatherCanvasTechnicalNoticePanel();
+  const iconHit: TechnicalNoticeIconHit | null =
+    sceneMode === 'technical-test' && showTechnicalNoticePanel ? { x: 0, y: 0, r: 0 } : null;
+  renderWeatherScene(
+    weatherSceneCtx,
+    nowSec,
+    sceneWidth,
+    sceneHeight,
+    rules,
+    sceneMode,
+    technicalWaveformBars,
+    technicalNoticeLines,
+    technicalNoticeExpanded,
+    iconHit,
+    showTechnicalNoticePanel,
+  );
+  weatherTechnicalNoticeIconHit = iconHit;
+}
 function wireCanvasResize(): void {
   canvasScope.disposeAll();
-  canvasScope.add(bindWindowResize(window, resizeCanvas));
+  canvasScope.add(bindWindowResize(window, () => stabilizeCanvasSizing()));
+  if (typeof ResizeObserver !== 'undefined') {
+    const observer = new ResizeObserver(() => {
+      stabilizeCanvasSizing(4);
+    });
+    observer.observe(gameScreen);
+    canvasScope.add(() => {
+      observer.disconnect();
+    });
+  }
+  canvasScope.add(() => {
+    if (canvasStabilizeRafId !== null) {
+      cancelTrackedAnimationFrame(window, canvasStabilizeRafId);
+      canvasStabilizeRafId = null;
+    }
+  });
 }
 
 function applyJudgement(judgement: Judgement, displayJudgement: string, lane: number | null): void {
@@ -977,7 +2264,9 @@ function applyJudgement(judgement: Judgement, displayJudgement: string, lane: nu
   updateHud(next.score, next.streak, mood === 'UZSIVEDIMAS' ? HYPE_LABEL : displayJudgement);
   showJudgementFeedback(judgement, displayJudgement, lane);
   if (judgement === 'TOBULA') {
-    horseAnimator.emitPerfectNotes(lane);
+    if (compileIsValid) {
+      horseAnimator.emitPerfectNotes(lane);
+    }
   }
   audio.onJudgement(judgement, { hypeStart, streakMilestone, lane });
 }
@@ -1030,9 +2319,10 @@ function startLanePress(
       autoHeldLanes.add(lane);
     }
     audio.startHold(lane);
-    mood = 'GERAI';
     const current = state.getState().score;
-    updateHud(current.score, current.streak, 'LAIKYK');
+    const keepHypeStatus = current.hypeActive;
+    mood = keepHypeStatus ? 'UZSIVEDIMAS' : 'GERAI';
+    updateHud(current.score, current.streak, keepHypeStatus ? HYPE_LABEL : 'LAIKYK');
     showJudgementFeedback('GERAI', 'LAIKYK', lane);
     setLaneHoldingClass(lane, true);
     return;
@@ -1058,6 +2348,49 @@ function releaseLanePress(releaseTimeSec: number, lane: number): void {
   }
 
   applyJudgement(hold.baseJudgement, hold.baseJudgement, lane);
+}
+
+function trimSetOldest(set: Set<number>, maxSize: number): void {
+  while (set.size > maxSize) {
+    const first = set.values().next();
+    if (first.done) {
+      break;
+    }
+    set.delete(first.value);
+  }
+}
+
+function prunePlayedBeatTracking(nowSec: number): void {
+  const activeWindow = engine.getBeatsInRange(nowSec - 3, nowSec + 8, true);
+  if (activeWindow.length === 0) {
+    if (autoPlayedBeatIds.size > MAX_TRACKED_AUTO_PLAYED_BEATS) {
+      autoPlayedBeatIds.clear();
+    }
+    if (songPlayedBeatIds.size > MAX_TRACKED_SONG_PLAYED_BEATS) {
+      songPlayedBeatIds.clear();
+    }
+    return;
+  }
+
+  let minId = activeWindow[0].id;
+  for (let i = 1; i < activeWindow.length; i += 1) {
+    minId = Math.min(minId, activeWindow[i].id);
+  }
+
+  const keepFromId = minId - 16;
+  for (const id of autoPlayedBeatIds) {
+    if (id < keepFromId) {
+      autoPlayedBeatIds.delete(id);
+    }
+  }
+  for (const id of songPlayedBeatIds) {
+    if (id < keepFromId) {
+      songPlayedBeatIds.delete(id);
+    }
+  }
+
+  trimSetOldest(autoPlayedBeatIds, MAX_TRACKED_AUTO_PLAYED_BEATS);
+  trimSetOldest(songPlayedBeatIds, MAX_TRACKED_SONG_PLAYED_BEATS);
 }
 
 function startLoop(): void {
@@ -1115,6 +2448,7 @@ function startLoop(): void {
       audio.playSongGuideNote(beat.toneHz, beat.holdDurationSec);
       audio.playSongBacking(beat.toneHz, beat.holdDurationSec);
     }
+    prunePlayedBeatTracking(now);
 
     for (const [lane, hold] of activeHolds) {
       if (now >= hold.endSec) {
@@ -1131,48 +2465,99 @@ function startLoop(): void {
       applyJudgement('PRALEISTA', 'PRALEISTA', null);
     }
     if (shouldRenderVisualFrame(timeMs)) {
-      renderLanes(now);
-      const holdingLane = activeHolds.values().next().value?.lane ?? null;
-      horseAnimator.render(timeMs, mood, rules, activeHolds.size > 0, holdingLane);
-      renderAudioVisualizer();
+      const visualizerSnapshot = audio.sampleVisualizer(52);
+      latestVisualizerBars = visualizerSnapshot.bars;
+      const technicalNoticeLines = compileIsValid ? [] : buildTechnicalCompileNoticeLines();
+      if (shouldRenderWeatherSceneFrame(timeMs)) {
+        renderBackgroundWeatherScene(now, latestVisualizerBars, technicalNoticeLines);
+      }
+      if (shouldRenderLaneFrame(timeMs)) {
+        renderLanes(now);
+      }
+      if (shouldRenderHorseFrame(timeMs)) {
+        const visualMood: HorseMood = compileIsValid ? mood : 'MIEGA';
+        const visualHasHold = compileIsValid && activeHolds.size > 0;
+        const holdingLane = visualHasHold
+          ? (activeHolds.values().next().value?.lane ?? null)
+          : null;
+        const sceneMode: WeatherSceneRenderMode = compileIsValid ? 'normal' : 'technical-test';
+        horseAnimator.render(
+          timeMs,
+          visualMood,
+          rules,
+          visualHasHold,
+          holdingLane,
+          sceneMode,
+          latestVisualizerBars,
+          technicalNoticeLines,
+          technicalNoticeExpanded,
+          false,
+        );
+      }
+      if (shouldRenderAudioVisualizerFrame(timeMs)) {
+        renderAudioVisualizer(visualizerSnapshot);
+      }
       updatePerformanceStats(timeMs);
     }
-    loopRafId = requestAnimationFrame(tick);
+    loopRafId = requestTrackedAnimationFrame(window, tick);
   };
 
-  loopRafId = requestAnimationFrame(tick);
+  loopRafId = requestTrackedAnimationFrame(window, tick);
 }
 
 async function initEditor(): Promise<void> {
+  const onCodeStudioToggle = (): void => {
+    if (!codeStudioEl.open) {
+      return;
+    }
+    requestTrackedAnimationFrame(window, () => {
+      tryAutoSizeEditorPanelForInitialLoad();
+      const fallback = document.querySelector<HTMLTextAreaElement>('#fallbackCode');
+      if (fallback) {
+        growEditorPanelToFitFallbackContent(fallback);
+        requestTrackedAnimationFrame(window, () => {
+          stabilizeEditorPanelAutoSize(fallback);
+        });
+      }
+      window.dispatchEvent(new Event('resize'));
+    });
+  };
+  editorScope.add(bindTrackedEventListener(codeStudioEl, 'toggle', onCodeStudioToggle));
+
   if (shouldUseSimpleEditor()) {
     mountSimpleEditor();
     return;
   }
 
   try {
-    const editor = await mountMonacoEditor(editorHost, CSHARP_TEMPLATE);
+    const editor = await mountMonacoEditor(editorHost, INITIAL_EDITOR_SOURCE);
+    tryAutoSizeEditorPanelForInitialLoad();
+
+    const compileApplier = createLatestCompileApplier(compiler, {
+      setRules: (next) => {
+        setRules(next);
+      },
+      setCompileValidity: (isValid, result) => {
+        setCompileValidityState(isValid, result);
+      },
+    });
 
     const runCompile = (): void => {
-      applyCompileResult(editor.getValue(), compiler, {
-        setRules: (next) => {
-          setRules(next);
-        },
-      });
+      void compileApplier.apply(editor.getValue());
     };
 
     editor.onDidChangeModelContent(() => {
-      if (compileTimer !== null) {
-        window.clearTimeout(compileTimer);
-      }
-      compileTimer = window.setTimeout(runCompile, 150);
+      persistEditorSource(editor.getValue());
+      clearTrackedTimeout(window, compileTimer);
+      compileTimer = setTrackedTimeout(window, runCompile, 150);
     });
 
     readEditorSource = (): string => editor.getValue();
     writeEditorSource = (next: string): void => {
-      editor.setValue(next);
-      if (compileTimer !== null) {
-        window.clearTimeout(compileTimer);
-      }
+      const normalized = ensureTrailingEmptyLine(next);
+      editor.setValue(normalized);
+      persistEditorSource(normalized);
+      clearTrackedTimeout(window, compileTimer);
       runCompile();
     };
 
@@ -1188,7 +2573,7 @@ async function initEditor(): Promise<void> {
 
 function wireInputs(): void {
   inputScope.disposeAll();
-  const abortController = new AbortController();
+  const abortController = createTrackedAbortController();
   const { signal } = abortController;
 
   const isTypingTarget = (target: EventTarget | null): boolean => {
@@ -1217,7 +2602,7 @@ function wireInputs(): void {
     }
 
     laneButton.classList.add('hit');
-    window.setTimeout(() => laneButton.classList.remove('hit'), 120);
+    setTrackedTimeout(window, () => laneButton.classList.remove('hit'), 120);
   };
 
   const vibrateTap = (): void => {
@@ -1240,131 +2625,238 @@ function wireInputs(): void {
     releaseLanePress(performance.now() / 1000, lane);
   };
 
+  const toggleTechnicalNoticeOnCanvasPointer = (
+    canvasEl: HTMLCanvasElement,
+    iconHit: TechnicalNoticeIconHit | null,
+    event: PointerEvent,
+  ): void => {
+    if (compileIsValid) {
+      return;
+    }
+    if (!isPointerInsideTechnicalIcon(canvasEl, iconHit, event.clientX, event.clientY)) {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+    technicalNoticeExpanded = !technicalNoticeExpanded;
+    renderCompileNoticeRail();
+    renderHorseCompileNotice();
+  };
+
+  inputScope.add(
+    bindTrackedEventListener(
+      compileNoticeToggleEl,
+      'click',
+      () => {
+        if (compileIsValid) {
+          return;
+        }
+        technicalNoticeExpanded = !technicalNoticeExpanded;
+        renderCompileNoticeRail();
+        renderHorseCompileNotice();
+      },
+      { signal },
+    ),
+  );
+
+  inputScope.add(
+    bindTrackedEventListener(
+      horseCompileNoticeToggleEl,
+      'click',
+      () => {
+        if (compileIsValid) {
+          return;
+        }
+        technicalNoticeExpanded = !technicalNoticeExpanded;
+        renderCompileNoticeRail();
+        renderHorseCompileNotice();
+      },
+      { signal },
+    ),
+  );
+
+  inputScope.add(
+    bindTrackedEventListener(
+      canvas,
+      'pointerdown',
+      (event) => {
+        toggleTechnicalNoticeOnCanvasPointer(
+          canvas,
+          horseAnimator.getTechnicalNoticeIconHit(),
+          event as PointerEvent,
+        );
+      },
+      { signal },
+    ),
+  );
+
+  inputScope.add(
+    bindTrackedEventListener(
+      weatherSceneCanvas,
+      'pointerdown',
+      (event) => {
+        toggleTechnicalNoticeOnCanvasPointer(
+          weatherSceneCanvas,
+          weatherTechnicalNoticeIconHit,
+          event as PointerEvent,
+        );
+      },
+      { signal },
+    ),
+  );
+
   document.querySelectorAll<HTMLButtonElement>('.input-row button').forEach((button) => {
     const lane = Number(button.dataset.lane);
-    button.addEventListener(
-      'touchstart',
+    inputScope.add(
+      bindTrackedEventListener(
+        button,
+        'touchstart',
+        (event) => {
+          event.preventDefault();
+          audio.unlock();
+          if (pressedLanes.has(lane)) {
+            return;
+          }
+          pressedLanes.add(lane);
+          pulseLaneButton(lane);
+          vibrateTap();
+          startLanePress(performance.now() / 1000, lane);
+        },
+        { passive: false, signal },
+      ),
+    );
+
+    inputScope.add(
+      bindTrackedEventListener(
+        button,
+        'touchend',
+        () => {
+          releasePointerLane(lane);
+        },
+        { signal },
+      ),
+    );
+
+    inputScope.add(
+      bindTrackedEventListener(
+        button,
+        'touchcancel',
+        () => {
+          releasePointerLane(lane);
+        },
+        { signal },
+      ),
+    );
+
+    inputScope.add(
+      bindTrackedEventListener(
+        button,
+        'mousedown',
+        () => {
+          audio.unlock();
+          if (pressedLanes.has(lane)) {
+            return;
+          }
+          pressedLanes.add(lane);
+          pulseLaneButton(lane);
+          startLanePress(performance.now() / 1000, lane);
+        },
+        { signal },
+      ),
+    );
+
+    inputScope.add(
+      bindTrackedEventListener(
+        button,
+        'mouseup',
+        () => {
+          releasePointerLane(lane);
+        },
+        { signal },
+      ),
+    );
+
+    inputScope.add(
+      bindTrackedEventListener(
+        button,
+        'mouseleave',
+        () => {
+          releasePointerLane(lane);
+        },
+        { signal },
+      ),
+    );
+  });
+
+  inputScope.add(
+    bindTrackedEventListener(
+      window,
+      'mouseup',
+      () => {
+        const now = performance.now() / 1000;
+        for (const lane of Array.from(pressedLanes)) {
+          if (keyHeldLanes.has(lane)) {
+            continue;
+          }
+          pressedLanes.delete(lane);
+          releaseLanePress(now, lane);
+        }
+      },
+      { signal },
+    ),
+  );
+
+  inputScope.add(
+    bindTrackedEventListener(
+      window,
+      'keydown',
       (event) => {
+        if (isTypingTarget(event.target)) {
+          return;
+        }
+
+        const lane = normalizeLaneFromKey((event as KeyboardEvent).key);
+        if (lane === null) {
+          return;
+        }
+
         event.preventDefault();
         audio.unlock();
         if (pressedLanes.has(lane)) {
           return;
         }
+        keyHeldLanes.add(lane);
         pressedLanes.add(lane);
         pulseLaneButton(lane);
-        vibrateTap();
         startLanePress(performance.now() / 1000, lane);
       },
-      { passive: false, signal },
-    );
-
-    button.addEventListener(
-      'touchend',
-      () => {
-        releasePointerLane(lane);
-      },
       { signal },
-    );
+    ),
+  );
 
-    button.addEventListener(
-      'touchcancel',
-      () => {
-        releasePointerLane(lane);
-      },
-      { signal },
-    );
-
-    button.addEventListener(
-      'mousedown',
-      () => {
-        audio.unlock();
-        if (pressedLanes.has(lane)) {
+  inputScope.add(
+    bindTrackedEventListener(
+      window,
+      'keyup',
+      (event) => {
+        if (isTypingTarget(event.target)) {
           return;
         }
-        pressedLanes.add(lane);
-        pulseLaneButton(lane);
-        startLanePress(performance.now() / 1000, lane);
-      },
-      { signal },
-    );
 
-    button.addEventListener(
-      'mouseup',
-      () => {
-        releasePointerLane(lane);
-      },
-      { signal },
-    );
+        const lane = normalizeLaneFromKey((event as KeyboardEvent).key);
+        if (lane === null) {
+          return;
+        }
 
-    button.addEventListener(
-      'mouseleave',
-      () => {
-        releasePointerLane(lane);
-      },
-      { signal },
-    );
-  });
-
-  window.addEventListener(
-    'mouseup',
-    () => {
-      const now = performance.now() / 1000;
-      for (const lane of Array.from(pressedLanes)) {
-        if (keyHeldLanes.has(lane)) {
-          continue;
+        keyHeldLanes.delete(lane);
+        if (!pressedLanes.has(lane)) {
+          return;
         }
         pressedLanes.delete(lane);
-        releaseLanePress(now, lane);
-      }
-    },
-    { signal },
-  );
-
-  window.addEventListener(
-    'keydown',
-    (event) => {
-      if (isTypingTarget(event.target)) {
-        return;
-      }
-
-      const lane = normalizeLaneFromKey(event.key);
-      if (lane === null) {
-        return;
-      }
-
-      event.preventDefault();
-      audio.unlock();
-      if (pressedLanes.has(lane)) {
-        return;
-      }
-      keyHeldLanes.add(lane);
-      pressedLanes.add(lane);
-      pulseLaneButton(lane);
-      startLanePress(performance.now() / 1000, lane);
-    },
-    { signal },
-  );
-
-  window.addEventListener(
-    'keyup',
-    (event) => {
-      if (isTypingTarget(event.target)) {
-        return;
-      }
-
-      const lane = normalizeLaneFromKey(event.key);
-      if (lane === null) {
-        return;
-      }
-
-      keyHeldLanes.delete(lane);
-      if (!pressedLanes.has(lane)) {
-        return;
-      }
-      pressedLanes.delete(lane);
-      releaseLanePress(performance.now() / 1000, lane);
-    },
-    { signal },
+        releaseLanePress(performance.now() / 1000, lane);
+      },
+      { signal },
+    ),
   );
 
   inputScope.add(() => {
@@ -1389,6 +2881,260 @@ function wireHudToggles(): void {
   autoplayScope.add(bindElementClick(muteToggleEl, onMuteToggle));
 }
 
+function closeResetProgressDialog(): void {
+  resetProgressConfirmInputEl.value = '';
+  resetProgressConfirmButtonEl.disabled = true;
+  if (resetProgressDialogEl.open) {
+    resetProgressDialogEl.close();
+  }
+}
+
+function closeUnlockAllMissionsDialog(): void {
+  unlockAllMissionsConfirmInputEl.value = '';
+  unlockAllMissionsConfirmButtonEl.disabled = true;
+  if (unlockAllMissionsDialogEl.open) {
+    unlockAllMissionsDialogEl.close();
+  }
+}
+
+function closeResetCodeDialog(): void {
+  resetCodeConfirmInputEl.value = '';
+  resetCodeConfirmButtonEl.disabled = true;
+  if (resetCodeDialogEl.open) {
+    resetCodeDialogEl.close();
+  }
+}
+
+function closeDangerDialogs(except: 'progress' | 'code' | 'unlock' | null = null): void {
+  if (except !== 'progress') {
+    closeResetProgressDialog();
+  }
+  if (except !== 'unlock') {
+    closeUnlockAllMissionsDialog();
+  }
+  if (except !== 'code') {
+    closeResetCodeDialog();
+  }
+}
+
+async function isValidUnlockMissionsCode(input: string): Promise<boolean> {
+  const normalizedInput = input.trim();
+  if (normalizedInput.length === 0 || typeof crypto?.subtle?.digest !== 'function') {
+    return false;
+  }
+
+  const encoded = new TextEncoder().encode(normalizedInput);
+  const digest = await crypto.subtle.digest('SHA-256', encoded);
+  const digestHex = Array.from(new Uint8Array(digest), (byte) =>
+    byte.toString(16).padStart(2, '0'),
+  ).join('');
+  return digestHex === UNLOCK_MISSIONS_CODE_HASH_SHA256;
+}
+
+function unlockAllMissionsProgress(): void {
+  writeSolvedPuzzleCount(CODE_PUZZLES.length);
+  renderPuzzleProgress();
+}
+
+function resetEditorCodeToDefault(): void {
+  const storage = readBrowserLocalStorageOrNull();
+  if (storage) {
+    clearPersistedEditorSource(storage);
+  }
+  writeEditorSource(CSHARP_TEMPLATE);
+  document.querySelectorAll<HTMLButtonElement>('.template-btn').forEach((el) => {
+    el.classList.remove('active');
+  });
+  renderPuzzleProgress();
+}
+
+function resetGameProgressToDefaults(): void {
+  writeSolvedPuzzleCount(0);
+  soundMuted = false;
+  audio.setMuted(false);
+  writeSoundMuted(false);
+  autoplayEnabled = true;
+  renderAutoplayUiState();
+  renderSoundUiState();
+  state.resetRun();
+  updateHud(0, 0, 'PRALEISTA');
+  mood = 'GERAI';
+  resetEditorCodeToDefault();
+}
+
+function wireDangerZone(): void {
+  dangerZoneScope.disposeAll();
+  const supportsUnlockAllMissionsModalDialog =
+    typeof unlockAllMissionsDialogEl.showModal === 'function' &&
+    typeof unlockAllMissionsDialogEl.close === 'function';
+  const supportsProgressModalDialog =
+    typeof resetProgressDialogEl.showModal === 'function' &&
+    typeof resetProgressDialogEl.close === 'function';
+  const supportsCodeModalDialog =
+    typeof resetCodeDialogEl.showModal === 'function' &&
+    typeof resetCodeDialogEl.close === 'function';
+
+  dangerZoneScope.add(
+    bindElementClick(resetProgressButtonEl, () => {
+      closeDangerDialogs('progress');
+      resetProgressConfirmInputEl.value = '';
+      resetProgressConfirmButtonEl.disabled = true;
+      if (supportsProgressModalDialog) {
+        resetProgressDialogEl.showModal();
+      } else {
+        resetProgressDialogEl.setAttribute('open', '');
+      }
+      resetProgressConfirmInputEl.focus();
+    }),
+  );
+  dangerZoneScope.add(
+    bindElementClick(unlockAllMissionsButtonEl, () => {
+      closeDangerDialogs('unlock');
+      unlockAllMissionsConfirmInputEl.value = '';
+      unlockAllMissionsConfirmButtonEl.disabled = true;
+      if (supportsUnlockAllMissionsModalDialog) {
+        unlockAllMissionsDialogEl.showModal();
+      } else {
+        unlockAllMissionsDialogEl.setAttribute('open', '');
+      }
+      unlockAllMissionsConfirmInputEl.focus();
+    }),
+  );
+  dangerZoneScope.add(
+    bindElementClick(unlockAllMissionsCancelButtonEl, () => {
+      closeUnlockAllMissionsDialog();
+    }),
+  );
+  dangerZoneScope.add(
+    bindElementClick(unlockAllMissionsConfirmButtonEl, async () => {
+      const canUnlock = await isValidUnlockMissionsCode(unlockAllMissionsConfirmInputEl.value);
+      if (!canUnlock) {
+        unlockAllMissionsConfirmButtonEl.disabled = true;
+        return;
+      }
+      unlockAllMissionsProgress();
+      closeUnlockAllMissionsDialog();
+    }),
+  );
+  dangerZoneScope.add(
+    bindElementClick(resetProgressCancelButtonEl, () => {
+      closeResetProgressDialog();
+    }),
+  );
+  dangerZoneScope.add(
+    bindElementClick(resetProgressConfirmButtonEl, () => {
+      if (resetProgressConfirmInputEl.value.trim() !== RESET_CONFIRMATION_PHRASE) {
+        return;
+      }
+      resetGameProgressToDefaults();
+      closeResetProgressDialog();
+      window.location.reload();
+    }),
+  );
+  dangerZoneScope.add(
+    bindElementClick(resetCodeButtonEl, () => {
+      closeDangerDialogs('code');
+      resetCodeConfirmInputEl.value = '';
+      resetCodeConfirmButtonEl.disabled = true;
+      if (supportsCodeModalDialog) {
+        resetCodeDialogEl.showModal();
+      } else {
+        resetCodeDialogEl.setAttribute('open', '');
+      }
+      resetCodeConfirmInputEl.focus();
+    }),
+  );
+  dangerZoneScope.add(
+    bindElementClick(resetCodeCancelButtonEl, () => {
+      closeResetCodeDialog();
+    }),
+  );
+  dangerZoneScope.add(
+    bindElementClick(resetCodeConfirmButtonEl, () => {
+      if (resetCodeConfirmInputEl.value.trim() !== RESET_CODE_CONFIRMATION_PHRASE) {
+        return;
+      }
+      resetEditorCodeToDefault();
+      closeResetCodeDialog();
+    }),
+  );
+
+  const onProgressInputChange = (): void => {
+    resetProgressConfirmButtonEl.disabled =
+      resetProgressConfirmInputEl.value.trim() !== RESET_CONFIRMATION_PHRASE;
+  };
+  let unlockMissionsValidationId = 0;
+  const onUnlockMissionsInputChange = (): void => {
+    unlockAllMissionsConfirmButtonEl.disabled = true;
+    const input = unlockAllMissionsConfirmInputEl.value;
+    const validationId = unlockMissionsValidationId + 1;
+    unlockMissionsValidationId = validationId;
+    void isValidUnlockMissionsCode(input).then((canUnlock) => {
+      if (validationId !== unlockMissionsValidationId) {
+        return;
+      }
+      unlockAllMissionsConfirmButtonEl.disabled = !canUnlock;
+    });
+  };
+  const onUnlockMissionsKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      closeUnlockAllMissionsDialog();
+      return;
+    }
+    if (event.key === 'Enter' && !unlockAllMissionsConfirmButtonEl.disabled) {
+      event.preventDefault();
+      unlockAllMissionsConfirmButtonEl.click();
+    }
+  };
+  const onProgressKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      closeResetProgressDialog();
+      return;
+    }
+    if (event.key === 'Enter' && !resetProgressConfirmButtonEl.disabled) {
+      event.preventDefault();
+      resetProgressConfirmButtonEl.click();
+    }
+  };
+  const onCodeInputChange = (): void => {
+    resetCodeConfirmButtonEl.disabled =
+      resetCodeConfirmInputEl.value.trim() !== RESET_CODE_CONFIRMATION_PHRASE;
+  };
+  const onCodeKeyDown = (event: KeyboardEvent): void => {
+    if (event.key === 'Escape') {
+      closeResetCodeDialog();
+      return;
+    }
+    if (event.key === 'Enter' && !resetCodeConfirmButtonEl.disabled) {
+      event.preventDefault();
+      resetCodeConfirmButtonEl.click();
+    }
+  };
+
+  dangerZoneScope.add(
+    bindTrackedEventListener(unlockAllMissionsConfirmInputEl, 'input', onUnlockMissionsInputChange),
+  );
+  dangerZoneScope.add(
+    bindTrackedEventListener(
+      unlockAllMissionsDialogEl,
+      'keydown',
+      onUnlockMissionsKeyDown as EventListener,
+    ),
+  );
+  dangerZoneScope.add(
+    bindTrackedEventListener(resetProgressConfirmInputEl, 'input', onProgressInputChange),
+  );
+  dangerZoneScope.add(
+    bindTrackedEventListener(resetProgressDialogEl, 'keydown', onProgressKeyDown as EventListener),
+  );
+  dangerZoneScope.add(
+    bindTrackedEventListener(resetCodeConfirmInputEl, 'input', onCodeInputChange),
+  );
+  dangerZoneScope.add(
+    bindTrackedEventListener(resetCodeDialogEl, 'keydown', onCodeKeyDown as EventListener),
+  );
+}
+
 function wireWindowLifecycleBindings(): void {
   windowLifecycleScope.disposeAll();
   const onPageHide = (event: PageTransitionEvent): void => {
@@ -1404,7 +3150,7 @@ function wireWindowLifecycleBindings(): void {
 
 function wireEditorResizeHandle(): void {
   editorResizeScope.disposeAll();
-  const abortController = new AbortController();
+  const abortController = createTrackedAbortController();
   const { signal } = abortController;
   let dragging = false;
   let startY = 0;
@@ -1436,81 +3182,104 @@ function wireEditorResizeHandle(): void {
     document.body.classList.remove('dragging-editor-resize');
   };
 
-  editorResizerEl.addEventListener(
-    'pointerdown',
-    (event) => {
-      if (event.button !== 0 && event.pointerType !== 'touch') {
-        return;
-      }
-      event.preventDefault();
-      dragging = true;
-      startY = event.clientY;
-      startHeight = editorPanelEl.getBoundingClientRect().height;
-      document.body.classList.add('dragging-editor-resize');
-      editorResizerEl.setPointerCapture(event.pointerId);
-    },
-    { signal },
+  editorResizeScope.add(
+    bindTrackedEventListener(
+      editorResizerEl,
+      'pointerdown',
+      (event) => {
+        const pointerEvent = event as PointerEvent;
+        if (pointerEvent.button !== 0 && pointerEvent.pointerType !== 'touch') {
+          return;
+        }
+        pointerEvent.preventDefault();
+        dragging = true;
+        startY = pointerEvent.clientY;
+        startHeight = editorPanelEl.getBoundingClientRect().height;
+        document.body.classList.add('dragging-editor-resize');
+        editorResizerEl.setPointerCapture(pointerEvent.pointerId);
+      },
+      { signal },
+    ),
   );
-  editorResizerEl.addEventListener(
-    'mousedown',
-    (event) => {
-      if (event.button !== 0) {
-        return;
-      }
-      event.preventDefault();
-      dragging = true;
-      startY = event.clientY;
-      startHeight = editorPanelEl.getBoundingClientRect().height;
-      document.body.classList.add('dragging-editor-resize');
-    },
-    { signal },
+  editorResizeScope.add(
+    bindTrackedEventListener(
+      editorResizerEl,
+      'mousedown',
+      (event) => {
+        const mouseEvent = event as MouseEvent;
+        if (mouseEvent.button !== 0) {
+          return;
+        }
+        mouseEvent.preventDefault();
+        dragging = true;
+        startY = mouseEvent.clientY;
+        startHeight = editorPanelEl.getBoundingClientRect().height;
+        document.body.classList.add('dragging-editor-resize');
+      },
+      { signal },
+    ),
   );
-  editorResizerEl.addEventListener(
-    'touchstart',
-    (event) => {
-      const touch = event.touches[0];
-      if (!touch) {
-        return;
-      }
-      event.preventDefault();
-      dragging = true;
-      startY = touch.clientY;
-      startHeight = editorPanelEl.getBoundingClientRect().height;
-      document.body.classList.add('dragging-editor-resize');
-    },
-    { passive: false, signal },
+  editorResizeScope.add(
+    bindTrackedEventListener(
+      editorResizerEl,
+      'touchstart',
+      (event) => {
+        const touchEvent = event as TouchEvent;
+        const touch = touchEvent.touches[0];
+        if (!touch) {
+          return;
+        }
+        touchEvent.preventDefault();
+        dragging = true;
+        startY = touch.clientY;
+        startHeight = editorPanelEl.getBoundingClientRect().height;
+        document.body.classList.add('dragging-editor-resize');
+      },
+      { passive: false, signal },
+    ),
   );
-  window.addEventListener('pointermove', onPointerMove, { passive: false, signal });
-  window.addEventListener(
-    'mousemove',
-    (event) => {
-      if (!dragging) {
-        return;
-      }
-      onMoveY(event.clientY);
-    },
-    { signal },
+  editorResizeScope.add(
+    bindTrackedEventListener(window, 'pointermove', onPointerMove as EventListener, {
+      passive: false,
+      signal,
+    }),
   );
-  window.addEventListener(
-    'touchmove',
-    (event) => {
-      if (!dragging) {
-        return;
-      }
-      const touch = event.touches[0];
-      if (!touch) {
-        return;
-      }
-      event.preventDefault();
-      onMoveY(touch.clientY);
-    },
-    { passive: false, signal },
+  editorResizeScope.add(
+    bindTrackedEventListener(
+      window,
+      'mousemove',
+      (event) => {
+        if (!dragging) {
+          return;
+        }
+        onMoveY((event as MouseEvent).clientY);
+      },
+      { signal },
+    ),
   );
-  window.addEventListener('pointerup', onPointerUp, { signal });
-  window.addEventListener('pointercancel', onPointerUp, { signal });
-  window.addEventListener('mouseup', onPointerUp, { signal });
-  window.addEventListener('touchend', onPointerUp, { signal });
-  window.addEventListener('touchcancel', onPointerUp, { signal });
+  editorResizeScope.add(
+    bindTrackedEventListener(
+      window,
+      'touchmove',
+      (event) => {
+        if (!dragging) {
+          return;
+        }
+        const touch = (event as TouchEvent).touches[0];
+        if (!touch) {
+          return;
+        }
+        event.preventDefault();
+        onMoveY(touch.clientY);
+      },
+      { passive: false, signal },
+    ),
+  );
+  editorResizeScope.add(bindTrackedEventListener(window, 'pointerup', onPointerUp, { signal }));
+  editorResizeScope.add(bindTrackedEventListener(window, 'pointercancel', onPointerUp, { signal }));
+  editorResizeScope.add(bindTrackedEventListener(window, 'mouseup', onPointerUp, { signal }));
+  editorResizeScope.add(bindTrackedEventListener(window, 'touchend', onPointerUp, { signal }));
+  editorResizeScope.add(bindTrackedEventListener(window, 'touchcancel', onPointerUp, { signal }));
 
   editorResizeScope.add(() => {
     abortController.abort();
@@ -1551,6 +3320,7 @@ declare global {
       };
       readHoldState(): { activeHolds: number; autoHeldLanes: number };
       readVisualState(): {
+        akiuSpalva: string;
         arklioSpalva: string;
         karciuSpalva: string;
         suKepure: boolean;
@@ -1558,6 +3328,13 @@ declare global {
         oroEfektas: string;
         mood: HorseMood;
       };
+      readHorseRuntime(): { noteParticles: number };
+      readTechnicalNoticeIcons(): {
+        horse: { x: number; y: number; r: number } | null;
+        weather: { x: number; y: number; r: number } | null;
+      };
+      isTechnicalNoticeExpanded(): boolean;
+      isCompileValid(): boolean;
       getRules(): DanceRules;
       readEditorSource(): string;
       readAudioState(): {
@@ -1571,6 +3348,32 @@ declare global {
         outputMuted: boolean;
       };
       readAudioVisualizer(): { level: number; peak: number; bars: number[] };
+      readPerformance(): {
+        fps: number;
+        frameMs: number;
+        visualCapFps: number;
+        mobileMode: boolean;
+      };
+      readPlaybackTracking(): {
+        autoPlayedBeatIds: number;
+        songPlayedBeatIds: number;
+      };
+      readResourceStats(): {
+        activeEventListeners: number;
+        activeTimeouts: number;
+        activeIntervals: number;
+        activeRafs: number;
+        activeAbortControllers: number;
+        activeResizeObservers: number;
+        activeSyntaxTrees: number;
+        peakEventListeners: number;
+        peakTimeouts: number;
+        peakIntervals: number;
+        peakRafs: number;
+        peakAbortControllers: number;
+        peakResizeObservers: number;
+        peakSyntaxTrees: number;
+      };
     };
   }
 }
@@ -1698,6 +3501,7 @@ window.__rhythmTest = {
     };
   },
   readVisualState(): {
+    akiuSpalva: string;
     arklioSpalva: string;
     karciuSpalva: string;
     suKepure: boolean;
@@ -1706,6 +3510,26 @@ window.__rhythmTest = {
     mood: HorseMood;
   } {
     return horseAnimator.getVisualState();
+  },
+  readHorseRuntime(): { noteParticles: number } {
+    return horseAnimator.getRuntimeStats();
+  },
+  readTechnicalNoticeIcons(): {
+    horse: { x: number; y: number; r: number } | null;
+    weather: { x: number; y: number; r: number } | null;
+  } {
+    const horse = horseAnimator.getTechnicalNoticeIconHit();
+    const weather = weatherTechnicalNoticeIconHit;
+    return {
+      horse: horse ? { x: horse.x, y: horse.y, r: horse.r } : null,
+      weather: weather ? { x: weather.x, y: weather.y, r: weather.r } : null,
+    };
+  },
+  isTechnicalNoticeExpanded(): boolean {
+    return technicalNoticeExpanded;
+  },
+  isCompileValid(): boolean {
+    return compileIsValid;
   },
   getRules(): DanceRules {
     return rules;
@@ -1734,26 +3558,55 @@ window.__rhythmTest = {
   readAudioVisualizer(): { level: number; peak: number; bars: number[] } {
     return audio.sampleVisualizer(24);
   },
+  readPerformance(): { fps: number; frameMs: number; visualCapFps: number; mobileMode: boolean } {
+    const mobileMode = isMobilePerformanceMode();
+    return {
+      fps: latestMeasuredFps,
+      frameMs: latestMeasuredFrameMs,
+      visualCapFps: mobileMode ? (autoplayEnabled ? 36 : 45) : 60,
+      mobileMode,
+    };
+  },
+  readPlaybackTracking(): { autoPlayedBeatIds: number; songPlayedBeatIds: number } {
+    return {
+      autoPlayedBeatIds: autoPlayedBeatIds.size,
+      songPlayedBeatIds: songPlayedBeatIds.size,
+    };
+  },
+  readResourceStats() {
+    return readResourceStatsSnapshot();
+  },
 };
 
-void compiler.init();
-puzzlesUnlocked = readPuzzlesUnlocked();
-soundMuted = readSoundMuted();
-audio.setMuted(soundMuted);
-void initEditor();
-wireTemplateButtons();
-wireAudioBootstrap();
-wireCanvasResize();
-wireInputs();
-wireHudToggles();
-wireEditorResizeHandle();
-wireWindowLifecycleBindings();
-renderAutoplayUiState();
-renderSoundUiState();
-applyGlobalWeatherTheme(rules.oroEfektas);
-renderPuzzleProgress();
-fitHudValuesToBox();
-requestAnimationFrame(resizeCanvas);
-state.goTo('play');
-state.resetRun();
-startLoop();
+async function bootstrapGame(): Promise<void> {
+  await compiler.init();
+  persistedSolvedPuzzleCount = readSolvedPuzzleCount();
+  soundMuted = readSoundMuted();
+  audio.setMuted(soundMuted);
+  persistEditorSource(INITIAL_EDITOR_SOURCE);
+  await initEditor();
+  wireTemplateButtons();
+  wireAudioBootstrap();
+  wireCanvasResize();
+  wireInputs();
+  wireHudToggles();
+  wireEditorResizeHandle();
+  wireDangerZone();
+  wireRealCompilerCheck();
+  wireWindowLifecycleBindings();
+  renderAutoplayUiState();
+  renderSoundUiState();
+  applyGlobalWeatherTheme(rules.oroEfektas);
+  renderPuzzleProgress();
+  renderCompileNoticeRail();
+  renderHorseCompileNotice();
+  fitHudValuesToBox();
+  requestTrackedAnimationFrame(window, () => {
+    resizeCanvas();
+  });
+  state.goTo('play');
+  state.resetRun();
+  startLoop();
+}
+
+void bootstrapGame();

@@ -1,3 +1,62 @@
+import {
+  trackEventListenerAdded,
+  trackEventListenerRemoved,
+  trackResizeObserverAdded,
+  trackResizeObserverRemoved,
+} from '../core/resourceTracker';
+
+interface EventTargetLike {
+  addEventListener: (
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | AddEventListenerOptions,
+  ) => void;
+  removeEventListener: (
+    type: string,
+    listener: EventListenerOrEventListenerObject,
+    options?: boolean | EventListenerOptions,
+  ) => void;
+}
+
+export function bindTrackedEventListener(
+  target: EventTargetLike,
+  type: string,
+  listener: EventListenerOrEventListenerObject,
+  options?: boolean | AddEventListenerOptions,
+): () => void {
+  target.addEventListener(type, listener, options);
+  trackEventListenerAdded();
+
+  let cleaned = false;
+  const signal = typeof options === 'object' && options !== null ? options.signal : undefined;
+  const onSignalAbort = (): void => {
+    if (cleaned) {
+      return;
+    }
+    cleaned = true;
+    trackEventListenerRemoved();
+  };
+  if (signal) {
+    if (signal.aborted) {
+      onSignalAbort();
+    } else {
+      signal.addEventListener('abort', onSignalAbort, { once: true });
+    }
+  }
+
+  return (): void => {
+    if (cleaned) {
+      return;
+    }
+    cleaned = true;
+    if (signal) {
+      signal.removeEventListener('abort', onSignalAbort);
+    }
+    target.removeEventListener(type, listener, options);
+    trackEventListenerRemoved();
+  };
+}
+
 export interface AudioBootstrapBindingsOptions {
   win: Pick<Window, 'addEventListener' | 'removeEventListener'>;
   doc: Pick<Document, 'addEventListener' | 'removeEventListener' | 'visibilityState'>;
@@ -19,12 +78,18 @@ export function bindAudioBootstrapBindings(options: AudioBootstrapBindingsOption
     }
   };
 
-  win.addEventListener('pointerdown', tryUnlock, { passive: true });
-  win.addEventListener('keydown', tryUnlock);
-  win.addEventListener('touchstart', tryUnlock, { passive: true });
-  win.addEventListener('mousedown', tryUnlock);
-  win.addEventListener('wheel', tryUnlock, { passive: true });
-  doc.addEventListener('visibilitychange', onVisibilityChange);
+  const unbindPointerDown = bindTrackedEventListener(win, 'pointerdown', tryUnlock, {
+    passive: true,
+  });
+  const unbindKeyDown = bindTrackedEventListener(win, 'keydown', tryUnlock);
+  const unbindTouchStart = bindTrackedEventListener(win, 'touchstart', tryUnlock, {
+    passive: true,
+  });
+  const unbindMouseDown = bindTrackedEventListener(win, 'mousedown', tryUnlock);
+  const unbindWheel = bindTrackedEventListener(win, 'wheel', tryUnlock, {
+    passive: true,
+  });
+  const unbindVisibility = bindTrackedEventListener(doc, 'visibilitychange', onVisibilityChange);
 
   let cleaned = false;
   return (): void => {
@@ -32,12 +97,12 @@ export function bindAudioBootstrapBindings(options: AudioBootstrapBindingsOption
       return;
     }
     cleaned = true;
-    win.removeEventListener('pointerdown', tryUnlock);
-    win.removeEventListener('keydown', tryUnlock);
-    win.removeEventListener('touchstart', tryUnlock);
-    win.removeEventListener('mousedown', tryUnlock);
-    win.removeEventListener('wheel', tryUnlock);
-    doc.removeEventListener('visibilitychange', onVisibilityChange);
+    unbindPointerDown();
+    unbindKeyDown();
+    unbindTouchStart();
+    unbindMouseDown();
+    unbindWheel();
+    unbindVisibility();
   };
 }
 
@@ -61,9 +126,12 @@ export function bindSimpleEditorResizeBindings(
   options: SimpleEditorResizeBindingsOptions,
 ): () => void {
   const { win, fallback, syncLines, ResizeObserverCtor } = options;
-  win.addEventListener('resize', syncLines, { passive: true });
+  const unbindResize = bindTrackedEventListener(win, 'resize', syncLines, { passive: true });
 
   const observer = ResizeObserverCtor ? new ResizeObserverCtor(syncLines) : null;
+  if (observer) {
+    trackResizeObserverAdded();
+  }
   observer?.observe(fallback);
 
   let cleaned = false;
@@ -72,8 +140,11 @@ export function bindSimpleEditorResizeBindings(
       return;
     }
     cleaned = true;
-    win.removeEventListener('resize', syncLines);
+    unbindResize();
     observer?.disconnect();
+    if (observer) {
+      trackResizeObserverRemoved();
+    }
   };
 }
 
@@ -81,14 +152,14 @@ export function bindWindowResize(
   win: Pick<Window, 'addEventListener' | 'removeEventListener'>,
   onResize: () => void,
 ): () => void {
-  win.addEventListener('resize', onResize, { passive: true });
+  const unbind = bindTrackedEventListener(win, 'resize', onResize, { passive: true });
   let cleaned = false;
   return (): void => {
     if (cleaned) {
       return;
     }
     cleaned = true;
-    win.removeEventListener('resize', onResize);
+    unbind();
   };
 }
 
@@ -96,15 +167,7 @@ export function bindElementClick(
   element: Pick<HTMLElement, 'addEventListener' | 'removeEventListener'>,
   onClick: () => void,
 ): () => void {
-  element.addEventListener('click', onClick);
-  let cleaned = false;
-  return (): void => {
-    if (cleaned) {
-      return;
-    }
-    cleaned = true;
-    element.removeEventListener('click', onClick);
-  };
+  return bindTrackedEventListener(element, 'click', onClick);
 }
 
 export function bindWindowLifecycle(
@@ -112,15 +175,15 @@ export function bindWindowLifecycle(
   onPageHide: (event: PageTransitionEvent) => void,
   onBeforeUnload: () => void,
 ): () => void {
-  win.addEventListener('pagehide', onPageHide);
-  win.addEventListener('beforeunload', onBeforeUnload);
+  const unbindPageHide = bindTrackedEventListener(win, 'pagehide', onPageHide as EventListener);
+  const unbindBeforeUnload = bindTrackedEventListener(win, 'beforeunload', onBeforeUnload);
   let cleaned = false;
   return (): void => {
     if (cleaned) {
       return;
     }
     cleaned = true;
-    win.removeEventListener('pagehide', onPageHide);
-    win.removeEventListener('beforeunload', onBeforeUnload);
+    unbindPageHide();
+    unbindBeforeUnload();
   };
 }

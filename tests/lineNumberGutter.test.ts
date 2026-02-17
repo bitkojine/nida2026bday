@@ -16,4 +16,9 @@ describe('lineNumberGutter', () => {
     const source = '\t\tab';
     expect(buildWrappedLineNumbers(source, 3)).toBe(['1', '↳'].join('\n'));
   });
+
+  it('keeps trailing empty source line visible in gutter', () => {
+    const source = 'abc\n';
+    expect(buildWrappedLineNumbers(source, 20)).toBe(['1', '2'].join('\n'));
+  });
 });

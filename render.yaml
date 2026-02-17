@@ -1,0 +1,11 @@
+services:
+  - type: web
+    name: nida2026bday-real-compiler
+    runtime: docker
+    plan: free
+    dockerfilePath: backend/RealCompilerApi/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      - key: FRONTEND_ORIGIN
+        value: https://bitkojine.github.io

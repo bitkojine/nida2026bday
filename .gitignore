@@ -7,10 +7,14 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 *.pid
+*.pid.lock
 *.seed
 
 # Dependencies
 node_modules
+
+# TypeScript
+*.tsbuildinfo
 
 # Build output
 dist
@@ -28,13 +32,22 @@ test-results
 !.env.example
 *.local
 
+# Misc temporary files
+*.tmp
+*.temp
+*.orig
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json
-.idea
+.idea/
 .DS_Store
 *.suo
 *.ntvs*
 *.njsproj
 *.sln
 *.sw?
+
+# .NET backend build output
+backend/**/bin/
+backend/**/obj/

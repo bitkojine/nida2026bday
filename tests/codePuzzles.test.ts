@@ -30,7 +30,7 @@ describe('codePuzzles', () => {
         suKepure: true,
         kepuresTipas: 'KARUNA',
         oroEfektas: 'SAULETA',
-        arklioSpalva: '#ff8800',
+        arklioSpalva: 'ORANZINE',
       },
       CSHARP_TEMPLATE,
     );
@@ -48,7 +48,7 @@ describe('codePuzzles', () => {
       suKepure: true,
       kepuresTipas: 'KARUNA' as const,
       oroEfektas: 'ZAIBAS' as const,
-      arklioSpalva: '#ffae4f',
+      arklioSpalva: 'ORANZINE' as const,
     };
 
     const progress = evaluatePuzzleProgress(finalRules, CSHARP_TEMPLATE);

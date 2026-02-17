@@ -1,66 +1,49 @@
-export const CSHARP_TEMPLATE = `public class DanceRules : IDanceRules
+export const CSHARP_TEMPLATE = `public enum KepuresTipas
 {
-    // === GALI KEISTI ŽEMIAU ===
+    KLASIKINE,
+    KAUBOJAUS,
+    KARUNA,
+    RAGANOS
+}
 
-    // Laiko langas (sekundėmis), kada paspaudimas laikomas TOBULU
+public enum OroEfektas
+{
+    SAULETA,
+    LIETINGA,
+    SNIEGAS,
+    ZAIBAS
+}
+
+public enum Spalva
+{
+    SMELIO,
+    TAMSIAI_RUDA,
+    RUDA,
+    JUODA,
+    BALTA,
+    AUKSINE,
+    ROZINE,
+    MELYNA,
+    ZALIA,
+    VIOLETINE,
+    ORANZINE
+}
+
+public class DanceRules
+{
     public float tobulasLangas = 0.05f;
-
-    // Laiko langas (sekundėmis), kada paspaudimas laikomas GERU
     public float gerasLangas = 0.12f;
-
-    // Taškai už TOBULĄ paspaudimą
     public int tobuliTaskai = 100;
-
-    // Taškai už GERĄ paspaudimą
     public int geriTaskai = 50;
-
-    // Kiek paspaudimų iš eilės reikia, kad įsijungtų UŽSIVEDIMAS
     public int serijaIkiUzsivedimo = 10;
-
-    // Arklio kūno spalva (HEX, pvz. #d6b48a)
-    public string arklioSpalva = "#d6b48a";
-
-    // Arklio karčių ir kojų spalva (HEX)
-    public string karciuSpalva = "#7d4f2d";
-
-    // Uždėti kepurę ant arklio (true / false)
+    public Spalva arklioSpalva = Spalva.SMELIO;
+    public Spalva karciuSpalva = Spalva.TAMSIAI_RUDA;
     public bool suKepure = false;
+    public KepuresTipas kepuresTipas = KepuresTipas.KLASIKINE;
+    public OroEfektas oroEfektas = OroEfektas.SAULETA;
 
-    // Kepurės tipas, kai suKepure = true (KLASIKINE / KAUBOJAUS / KARUNA / RAGANOS)
-    public string kepuresTipas = "KLASIKINE";
-
-    // Oras aplink arklį (SAULETA / LIETINGA / SNIEGAS / ZAIBAS)
-    public string oroEfektas = "SAULETA";
-
-    // === GALI KEISTI AUKŠČIAU ===
-
-    public bool ArTobulas(float paklaida)
+    public Spalva AkiuSpalva()
     {
-        return paklaida <= tobulasLangas;
-    }
-
-    public bool ArGeras(float paklaida)
-    {
-        return paklaida <= gerasLangas;
-    }
-
-    public int SkaiciuotiTaskus(bool tobulas, bool geras)
-    {
-        if (tobulas)
-        {
-            return tobuliTaskai;
-        }
-
-        if (geras)
-        {
-            return geriTaskai;
-        }
-
-        return 0;
-    }
-
-    public bool ArUzsivedimui(int serija)
-    {
-        return serija >= serijaIkiUzsivedimo;
+        return Spalva.JUODA;
     }
 }`;
