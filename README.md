@@ -47,6 +47,7 @@ npm run preview
 
 - 4 juostų ritmo žaidimas (`← ↓ ↑ →`) su rankiniu valdymu ir autoplay
 - C# studija su gyvu taisyklių pritaikymu
+- Rankinis „tikro C# kompiliatoriaus“ patikrinimas per API mygtuką C# studijoje
 - Keičiamo aukščio kodo langas su apsauga nuo nekontroliuojamo auto-didėjimo
 - 5 mokymosi misijos su nuolat išsaugomu progresu (`0/5` -> `5/5`)
 - Šablonų mygtukų atrakinimas po visų misijų
@@ -106,6 +107,13 @@ Kodo tikrinimas:
 - naudojamas `tree-sitter` C# WASM analizatorius + papildomos projekto taisyklės
 - jei WASM aplinka nepasiekiama, taikomas atsarginis struktūrinis tikrinimas
 - kai tikrinimas nepraeina, žaidimas pereina į techninės klaidos vizualinį režimą (miegantis arklys, techninis fonas)
+
+Tikro kompiliatoriaus mygtukas:
+
+- C# studijoje yra mygtukas `Patikrinti tikru C# kompiliatoriumi`
+- jis siunčia dabartinį kodą į backend API (`/api/csharp/compile`)
+- rodo Roslyn verdictą (`kodas kompiliuojasi` / `NESIKOMPILIUOJA`) ir klaidų sąrašą
+- jei API nepasiekiamas ar nesukonfigūruotas, rodomas aiškus pranešimas
 
 ## Šablonai
 
@@ -265,6 +273,20 @@ Workflow failai:
 
 - `.github/workflows/deploy-pages.yml` - build/deploy į GitHub Pages
 - `.github/workflows/e2e.yml` - atskiras E2E pipeline
+
+Papildomas backend (tikram C# kompiliatoriui):
+
+- `backend/RealCompilerApi` - .NET 8 minimal API su Roslyn
+- `render.yaml` - Render Free paslaugos konfigūracija
+- `FRONTEND_ORIGIN` (Render env) turi būti tavo GitHub Pages origin (pvz. `https://bitkojine.github.io`)
+- frontend env `VITE_REAL_COMPILER_API_URL` turi rodyti į Render API (žr. `.env.example`)
+
+Render diegimo žingsniai:
+
+1. Render dashboard pasirink `Blueprint` ir prijunk šį repo (naudos `render.yaml`)
+2. Patikrink, kad paslauga `nida2026bday-real-compiler` pakilo ir `/health` grąžina `ok=true`
+3. Frontend build aplinkoje nustatyk `VITE_REAL_COMPILER_API_URL=https://<tavo-service>.onrender.com`
+4. Perkrauk/deploy frontend, tada C# studijos mygtukas naudos tikrą Roslyn tikrinimą
 
 Deploy eiga:
 

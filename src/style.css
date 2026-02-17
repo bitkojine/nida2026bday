@@ -1195,6 +1195,46 @@ h1 {
   gap: 6px;
 }
 
+.real-compiler-panel {
+  margin-top: var(--space-stack);
+  border: 1px solid var(--panel-edge);
+  border-radius: 10px;
+  background: #fffaf1;
+  padding: 8px;
+  display: grid;
+  gap: 8px;
+}
+
+.real-compiler-btn {
+  min-height: 42px;
+  border-radius: 9px;
+  border: 1px solid rgba(130, 93, 47, 0.25);
+  background: linear-gradient(180deg, #fffef8, #f8e8c6);
+  color: #3d2d1d;
+  font-weight: 800;
+  font-size: var(--fs-small);
+  padding: 6px 10px;
+  text-align: center;
+}
+
+.real-compiler-btn:disabled {
+  opacity: 0.6;
+}
+
+.real-compiler-status {
+  margin: 0;
+  min-height: 52px;
+  border: 1px solid rgba(146, 109, 64, 0.28);
+  border-radius: 8px;
+  background: linear-gradient(180deg, rgba(255, 252, 242, 0.96), rgba(255, 244, 216, 0.96));
+  color: #463220;
+  font-family: 'Manrope', sans-serif;
+  font-size: var(--fs-body);
+  line-height: 1.34;
+  white-space: pre-wrap;
+  padding: 8px 10px;
+}
+
 .template-btn {
   min-height: 44px;
   border-radius: 9px;

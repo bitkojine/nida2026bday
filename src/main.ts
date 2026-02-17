@@ -31,6 +31,7 @@ import {
 } from './render/horseAnimator';
 import { CodeCompilerService } from './services/codeCompilerService';
 import { CSHARP_TEMPLATE } from './services/csharpTemplate';
+import { checkWithRealCompiler } from './services/realCompilerService';
 import { createLatestCompileApplier, wireFallbackCompiler } from './ui/compileFeedback';
 import { CODE_PUZZLES, evaluatePuzzleProgress } from './ui/codePuzzles';
 import { applyDanceRuleTemplate, DANCE_RULE_TEMPLATES } from './ui/danceRuleTemplates';
@@ -190,6 +191,12 @@ app.innerHTML = `
             ).join('')}
           </div>
         </section>
+        <section class="real-compiler-panel" aria-label="Tikro C# kompiliatoriaus tikrinimas">
+          <button class="real-compiler-btn" id="realCompilerCheckButton" type="button">
+            Patikrinti tikru C# kompiliatoriumi
+          </button>
+          <pre class="real-compiler-status" id="realCompilerStatus">Tikras C# kompiliatorius: nepatikrinta.</pre>
+        </section>
       </details>
       <details class="perf-stack" aria-label="Našumo statistika">
         <summary class="collapsible-title">ℹ️ Papildoma informacija apie žaidimą</summary>
@@ -338,6 +345,8 @@ const puzzleHintEl = requiredElement<HTMLElement>('#puzzleHint');
 const puzzleDoneEl = requiredElement<HTMLElement>('#puzzleDone');
 const templateLockNoteEl = requiredElement<HTMLElement>('#templateLockNote');
 const templateRewardEl = requiredElement<HTMLElement>('#templateReward');
+const realCompilerCheckButtonEl = requiredElement<HTMLButtonElement>('#realCompilerCheckButton');
+const realCompilerStatusEl = requiredElement<HTMLElement>('#realCompilerStatus');
 const laneHighwayEl = requiredElement<HTMLElement>('#laneHighway');
 const codeStudioEl = requiredElement<HTMLDetailsElement>('.code-studio');
 const editorPanelEl = requiredElement<HTMLElement>('#editorPanel');
@@ -500,6 +509,7 @@ const windowLifecycleScope = createRuntimeScope();
 const templateScope = createRuntimeScope();
 const editorResizeScope = createRuntimeScope();
 const dangerZoneScope = createRuntimeScope();
+const realCompilerScope = createRuntimeScope();
 let persistedSolvedPuzzleCount = 0;
 const autoPlayedBeatIds = new Set<number>();
 const songPlayedBeatIds = new Set<number>();
@@ -823,7 +833,22 @@ function readSolvedPuzzleCount(): number {
       return 0;
     }
     const parsed = Number.parseInt(raw, 10);
-    return clampSolvedPuzzleCount(parsed);
+    if (!Number.isFinite(parsed)) {
+      window.localStorage.removeItem(PUZZLE_PROGRESS_STORAGE_KEY);
+      return 0;
+    }
+
+    const clamped = clampSolvedPuzzleCount(parsed);
+    if (clamped <= 0) {
+      window.localStorage.removeItem(PUZZLE_PROGRESS_STORAGE_KEY);
+      return 0;
+    }
+
+    const normalized = `${clamped}`;
+    if (raw !== normalized) {
+      window.localStorage.setItem(PUZZLE_PROGRESS_STORAGE_KEY, normalized);
+    }
+    return clamped;
   } catch {
     return 0;
   }
@@ -986,6 +1011,7 @@ function teardownGame(): void {
   templateScope.disposeAll();
   editorResizeScope.disposeAll();
   dangerZoneScope.disposeAll();
+  realCompilerScope.disposeAll();
 
   if (loopRafId !== null) {
     window.cancelAnimationFrame(loopRafId);
@@ -1143,6 +1169,60 @@ function wireTemplateButtons(): void {
         });
       }),
     );
+  });
+}
+
+function wireRealCompilerCheck(): void {
+  realCompilerScope.disposeAll();
+  let activeController: AbortController | null = null;
+
+  const runCheck = async (): Promise<void> => {
+    activeController?.abort();
+    const controller = new AbortController();
+    activeController = controller;
+    realCompilerCheckButtonEl.disabled = true;
+    realCompilerStatusEl.textContent = 'Tikras C# kompiliatorius tikrina kodą...';
+
+    const result = await checkWithRealCompiler(readEditorSource(), { signal: controller.signal });
+    if (activeController !== controller) {
+      return;
+    }
+    activeController = null;
+    realCompilerCheckButtonEl.disabled = false;
+
+    if (result.kind === 'ok') {
+      const header = result.valid
+        ? `Tikras C# kompiliatorius (${result.compiler}): kodas kompiliuojasi.`
+        : `Tikras C# kompiliatorius (${result.compiler}): kodas NESIKOMPILIUOJA.`;
+      const details =
+        result.diagnostics.length > 0
+          ? `\nKlaidos:\n${result.diagnostics.slice(0, 6).join('\n')}`
+          : '\nKlaidų nerasta.';
+      realCompilerStatusEl.textContent = `${header}${details}`;
+      return;
+    }
+
+    if (result.kind === 'unavailable') {
+      realCompilerStatusEl.textContent = `Tikras C# kompiliatorius nepasiekiamas: ${result.reason}`;
+      return;
+    }
+
+    if (result.kind === 'aborted') {
+      realCompilerStatusEl.textContent = 'Tikrinimas nutrauktas.';
+      return;
+    }
+
+    realCompilerStatusEl.textContent = `Tikras C# kompiliatorius nepasiekiamas: ${result.reason}`;
+  };
+
+  realCompilerScope.add(
+    bindElementClick(realCompilerCheckButtonEl, () => {
+      void runCheck();
+    }),
+  );
+  realCompilerScope.add(() => {
+    activeController?.abort();
+    activeController = null;
   });
 }
 
@@ -2549,6 +2629,18 @@ function closeResetCodeDialog(): void {
   }
 }
 
+function closeDangerDialogs(except: 'progress' | 'code' | 'unlock' | null = null): void {
+  if (except !== 'progress') {
+    closeResetProgressDialog();
+  }
+  if (except !== 'unlock') {
+    closeUnlockAllMissionsDialog();
+  }
+  if (except !== 'code') {
+    closeResetCodeDialog();
+  }
+}
+
 async function isValidUnlockMissionsCode(input: string): Promise<boolean> {
   const normalizedInput = input.trim();
   if (normalizedInput.length === 0 || typeof crypto?.subtle?.digest !== 'function') {
@@ -2608,6 +2700,7 @@ function wireDangerZone(): void {
 
   dangerZoneScope.add(
     bindElementClick(resetProgressButtonEl, () => {
+      closeDangerDialogs('progress');
       resetProgressConfirmInputEl.value = '';
       resetProgressConfirmButtonEl.disabled = true;
       if (supportsProgressModalDialog) {
@@ -2620,6 +2713,7 @@ function wireDangerZone(): void {
   );
   dangerZoneScope.add(
     bindElementClick(unlockAllMissionsButtonEl, () => {
+      closeDangerDialogs('unlock');
       unlockAllMissionsConfirmInputEl.value = '';
       unlockAllMissionsConfirmButtonEl.disabled = true;
       if (supportsUnlockAllMissionsModalDialog) {
@@ -2663,6 +2757,7 @@ function wireDangerZone(): void {
   );
   dangerZoneScope.add(
     bindElementClick(resetCodeButtonEl, () => {
+      closeDangerDialogs('code');
       resetCodeConfirmInputEl.value = '';
       resetCodeConfirmButtonEl.disabled = true;
       if (supportsCodeModalDialog) {
@@ -3171,6 +3266,7 @@ async function bootstrapGame(): Promise<void> {
   wireHudToggles();
   wireEditorResizeHandle();
   wireDangerZone();
+  wireRealCompilerCheck();
   wireWindowLifecycleBindings();
   renderAutoplayUiState();
   renderSoundUiState();

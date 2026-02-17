@@ -364,6 +364,40 @@ test.describe('Rhythm game flow', () => {
     await expect(dialog).not.toBeVisible();
   });
 
+  test('@smoke30 danger dialogs stay exclusive when switching quickly', async ({ page }) => {
+    const pageErrors: string[] = [];
+    page.on('pageerror', (error) => {
+      pageErrors.push(error.message);
+    });
+
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensurePerfStackOpen(page);
+
+    await page.locator('#resetProgressButton').click();
+    await expect(page.locator('#resetProgressDialog')).toBeVisible();
+
+    await page.locator('#unlockAllMissionsButton').evaluate((node) => {
+      (node as HTMLButtonElement).click();
+    });
+    await expect(page.locator('#unlockAllMissionsDialog')).toBeVisible();
+    await expect(page.locator('#resetProgressDialog')).not.toBeVisible();
+
+    await page.locator('#resetCodeButton').evaluate((node) => {
+      (node as HTMLButtonElement).click();
+    });
+    await expect(page.locator('#resetCodeDialog')).toBeVisible();
+    await expect(page.locator('#unlockAllMissionsDialog')).not.toBeVisible();
+
+    await page.locator('#resetProgressButton').evaluate((node) => {
+      (node as HTMLButtonElement).click();
+    });
+    await expect(page.locator('#resetProgressDialog')).toBeVisible();
+    await expect(page.locator('#resetCodeDialog')).not.toBeVisible();
+
+    expect(pageErrors).toEqual([]);
+  });
+
   test('danger zone mission unlock dialog accepts only valid hidden cheat code', async ({
     page,
   }) => {
