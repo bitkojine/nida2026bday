@@ -1,22 +1,36 @@
+export interface RealCompilerDebugDetails {
+  endpoint: string;
+  requestMethod: 'POST';
+  requestHeaders: Record<string, string>;
+  requestBody: string;
+  responseStatus: number | null;
+  responseBody: string | null;
+  checkedAtIso: string;
+}
+
 export interface RealCompilerSuccessResult {
   kind: 'ok';
   valid: boolean;
   diagnostics: string[];
   compiler: string;
+  details: RealCompilerDebugDetails;
 }
 
 export interface RealCompilerUnavailableResult {
   kind: 'unavailable';
   reason: string;
+  details: RealCompilerDebugDetails;
 }
 
 export interface RealCompilerErrorResult {
   kind: 'error';
   reason: string;
+  details: RealCompilerDebugDetails;
 }
 
 export interface RealCompilerAbortedResult {
   kind: 'aborted';
+  details: RealCompilerDebugDetails;
 }
 
 export type RealCompilerCheckResult =
@@ -55,36 +69,59 @@ export async function checkWithRealCompiler(
   options?: { signal?: AbortSignal },
 ): Promise<RealCompilerCheckResult> {
   const apiUrl = readRealCompilerApiUrl();
+  const endpoint = `${apiUrl.replace(/\/$/, '')}/api/csharp/compile`;
+  const requestBody = JSON.stringify({ source });
+  const baseDetails: RealCompilerDebugDetails = {
+    endpoint,
+    requestMethod: 'POST',
+    requestHeaders: { 'content-type': 'application/json' },
+    requestBody,
+    responseStatus: null,
+    responseBody: null,
+    checkedAtIso: new Date().toISOString(),
+  };
   if (!apiUrl) {
     return {
       kind: 'unavailable',
       reason: 'nenurodytas VITE_REAL_COMPILER_API_URL adresas.',
+      details: {
+        ...baseDetails,
+        endpoint: '',
+      },
     };
   }
 
   let response: Response;
   try {
-    response = await fetch(`${apiUrl.replace(/\/$/, '')}/api/csharp/compile`, {
+    response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ source }),
+      body: requestBody,
       signal: options?.signal,
     });
   } catch (error) {
     if (isAbortError(error)) {
-      return { kind: 'aborted' };
+      return { kind: 'aborted', details: baseDetails };
     }
     return {
       kind: 'error',
       reason: 'nepavyko pasiekti kompiliatoriaus API.',
+      details: baseDetails,
     };
   }
 
+  const responseText = await response.text().catch(() => '');
+  const details: RealCompilerDebugDetails = {
+    ...baseDetails,
+    responseStatus: response.status,
+    responseBody: responseText,
+  };
+
   let payload: RealCompilerApiPayload | null = null;
   try {
-    payload = (await response.json()) as RealCompilerApiPayload;
+    payload = JSON.parse(responseText) as RealCompilerApiPayload;
   } catch {
     payload = null;
   }
@@ -93,6 +130,7 @@ export async function checkWithRealCompiler(
     return {
       kind: 'error',
       reason: 'kompiliatoriaus API grąžino netinkamą atsakymą.',
+      details,
     };
   }
 
@@ -101,5 +139,6 @@ export async function checkWithRealCompiler(
     valid: payload.valid,
     diagnostics: parseDiagnostics(payload.diagnostics),
     compiler: typeof payload.compiler === 'string' ? payload.compiler : 'Roslyn',
+    details,
   };
 }

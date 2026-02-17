@@ -14,6 +14,13 @@ describe('realCompilerService', () => {
     vi.unstubAllEnvs();
     const result = await checkWithRealCompiler('public class DanceRules {}');
     expect(result).toMatchObject({ kind: 'unavailable' });
+    expect(result.details).toEqual(
+      expect.objectContaining({
+        endpoint: '',
+        requestMethod: 'POST',
+        responseStatus: null,
+      }),
+    );
   });
 
   it('calls API and returns successful compiler response', async () => {
@@ -36,12 +43,18 @@ describe('realCompilerService', () => {
         method: 'POST',
       }),
     );
-    expect(result).toEqual({
-      kind: 'ok',
-      valid: false,
-      diagnostics: ['CS1002 (2,10): ; expected'],
-      compiler: 'Roslyn C#',
-    });
+    expect(result).toEqual(
+      expect.objectContaining({
+        kind: 'ok',
+        valid: false,
+        diagnostics: ['CS1002 (2,10): ; expected'],
+        compiler: 'Roslyn C#',
+        details: expect.objectContaining({
+          endpoint: 'https://compiler.example/api/csharp/compile',
+          responseStatus: 200,
+        }),
+      }),
+    );
   });
 
   it('returns error when API is unreachable', async () => {
@@ -52,5 +65,11 @@ describe('realCompilerService', () => {
 
     const result = await checkWithRealCompiler('code');
     expect(result).toMatchObject({ kind: 'error' });
+    expect(result.details).toEqual(
+      expect.objectContaining({
+        endpoint: 'https://compiler.example/api/csharp/compile',
+        responseStatus: null,
+      }),
+    );
   });
 });

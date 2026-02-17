@@ -31,7 +31,11 @@ import {
 } from './render/horseAnimator';
 import { CodeCompilerService } from './services/codeCompilerService';
 import { CSHARP_TEMPLATE } from './services/csharpTemplate';
-import { checkWithRealCompiler } from './services/realCompilerService';
+import {
+  checkWithRealCompiler,
+  type RealCompilerCheckResult,
+  type RealCompilerDebugDetails,
+} from './services/realCompilerService';
 import { createLatestCompileApplier, wireFallbackCompiler } from './ui/compileFeedback';
 import { CODE_PUZZLES, evaluatePuzzleProgress } from './ui/codePuzzles';
 import { applyDanceRuleTemplate, DANCE_RULE_TEMPLATES } from './ui/danceRuleTemplates';
@@ -454,6 +458,8 @@ let autoplayEnabled = true;
 let soundMuted = false;
 let compileIsValid = true;
 let latestCompileResult: CompileResult | null = null;
+let latestRealCompilerNotice = 'Tikras C# kompiliatorius dar nepaleistas rankiniu mygtuku.';
+let latestRealCompilerDetailLines = ['Tikro C# kompiliatoriaus užklausos dar nėra.'];
 let cachedTechnicalNoticeSignature = '';
 let cachedTechnicalNoticeLines: string[] | null = null;
 let technicalNoticeExpanded = false;
@@ -699,6 +705,45 @@ function setCompileValidityState(isValid: boolean, result: CompileResult): void 
   renderHorseCompileNotice();
 }
 
+function setRealCompilerNotice(message: string, detailLines?: string[]): void {
+  latestRealCompilerNotice = message.trim();
+  if (detailLines) {
+    latestRealCompilerDetailLines = detailLines;
+  }
+  cachedTechnicalNoticeSignature = '';
+  cachedTechnicalNoticeLines = null;
+  renderCompileNoticeRail();
+  renderHorseCompileNotice();
+}
+
+function buildRealCompilerSummary(result: RealCompilerCheckResult): string {
+  if (result.kind === 'ok') {
+    return result.valid
+      ? `Tikras C# kompiliatorius (${result.compiler}): kodas kompiliuojasi.`
+      : `Tikras C# kompiliatorius (${result.compiler}): kodas NESIKOMPILIUOJA.`;
+  }
+  if (result.kind === 'aborted') {
+    return 'Tikras C# kompiliatoriaus tikrinimas nutrauktas.';
+  }
+  return `Tikras C# kompiliatorius nepasiekiamas: ${result.reason}`;
+}
+
+function buildRealCompilerDetailLines(details: RealCompilerDebugDetails): string[] {
+  return [
+    `Tikrinta: ${details.checkedAtIso}`,
+    `Endpoint: ${details.endpoint || '(nenurodytas)'}`,
+    `Užklausos metodas: ${details.requestMethod}`,
+    `Užklausos antraštės: ${JSON.stringify(details.requestHeaders)}`,
+    'Užklausa (siųstas turinys):',
+    details.requestBody || '(tuščia)',
+    `Atsakymo statusas: ${details.responseStatus === null ? '(negautas)' : details.responseStatus}`,
+    'Atsakymas (gautas turinys):',
+    details.responseBody && details.responseBody.trim().length > 0
+      ? details.responseBody
+      : '(tuščia)',
+  ];
+}
+
 function buildTechnicalCompileNoticeLines(): string[] {
   const result = latestCompileResult;
   const signature = JSON.stringify({
@@ -706,6 +751,8 @@ function buildTechnicalCompileNoticeLines(): string[] {
     syntaxEngine: result?.syntaxEngine ?? null,
     success: result?.success ?? null,
     firstError: result?.errors?.[0] ?? null,
+    realCompiler: latestRealCompilerNotice,
+    realCompilerDetails: latestRealCompilerDetailLines.join('\n'),
   });
   if (cachedTechnicalNoticeLines !== null && cachedTechnicalNoticeSignature === signature) {
     return cachedTechnicalNoticeLines;
@@ -737,7 +784,13 @@ function buildTechnicalCompileNoticeLines(): string[] {
     '4) Rezultatas',
     statusLine,
     '',
-    '5) Klaida',
+    '5) Tikras C# kompiliatorius',
+    latestRealCompilerNotice,
+    '',
+    '6) Tikro C# kompiliatoriaus užklausos detalės',
+    ...latestRealCompilerDetailLines,
+    '',
+    '7) Klaida',
     errorLine,
   ];
   return cachedTechnicalNoticeLines;
@@ -1181,7 +1234,9 @@ function wireRealCompilerCheck(): void {
     const controller = new AbortController();
     activeController = controller;
     realCompilerCheckButtonEl.disabled = true;
-    realCompilerStatusEl.textContent = 'Tikras C# kompiliatorius tikrina kodą...';
+    const checkingText = 'Tikras C# kompiliatorius tikrina kodą...';
+    realCompilerStatusEl.textContent = checkingText;
+    setRealCompilerNotice(checkingText, ['Užklausa siunčiama...']);
 
     const result = await checkWithRealCompiler(readEditorSource(), { signal: controller.signal });
     if (activeController !== controller) {
@@ -1190,29 +1245,18 @@ function wireRealCompilerCheck(): void {
     activeController = null;
     realCompilerCheckButtonEl.disabled = false;
 
+    const summary = buildRealCompilerSummary(result);
+    const details = buildRealCompilerDetailLines(result.details);
     if (result.kind === 'ok') {
-      const header = result.valid
-        ? `Tikras C# kompiliatorius (${result.compiler}): kodas kompiliuojasi.`
-        : `Tikras C# kompiliatorius (${result.compiler}): kodas NESIKOMPILIUOJA.`;
-      const details =
+      const diagnosticsText =
         result.diagnostics.length > 0
-          ? `\nKlaidos:\n${result.diagnostics.slice(0, 6).join('\n')}`
+          ? `\nKlaidos:\n${result.diagnostics.join('\n')}`
           : '\nKlaidų nerasta.';
-      realCompilerStatusEl.textContent = `${header}${details}`;
-      return;
+      realCompilerStatusEl.textContent = `${summary}${diagnosticsText}`;
+    } else {
+      realCompilerStatusEl.textContent = summary;
     }
-
-    if (result.kind === 'unavailable') {
-      realCompilerStatusEl.textContent = `Tikras C# kompiliatorius nepasiekiamas: ${result.reason}`;
-      return;
-    }
-
-    if (result.kind === 'aborted') {
-      realCompilerStatusEl.textContent = 'Tikrinimas nutrauktas.';
-      return;
-    }
-
-    realCompilerStatusEl.textContent = `Tikras C# kompiliatorius nepasiekiamas: ${result.reason}`;
+    setRealCompilerNotice(summary, details);
   };
 
   realCompilerScope.add(

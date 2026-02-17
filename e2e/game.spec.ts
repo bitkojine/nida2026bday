@@ -2186,6 +2186,9 @@ test.describe('Rhythm game flow', () => {
   test('technical notice question-mark icon toggles details on both canvases', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();
+    await ensureCodeStudioOpen(page);
+    await page.locator('#realCompilerCheckButton').click();
+    await expect(page.locator('#realCompilerStatus')).not.toContainText('tikrina kodą');
 
     const dispatchTechnicalIconPointer = async (
       canvasSelector: '#weatherSceneCanvas' | '#horseCanvas',
@@ -2256,6 +2259,20 @@ test.describe('Rhythm game flow', () => {
         return await page.evaluate(() => window.__rhythmTest?.isTechnicalNoticeExpanded() ?? false);
       })
       .toBe(true);
+
+    const noticeText = await page
+      .locator('#compileNoticeRail')
+      .isVisible()
+      .then(async (visible) => {
+        if (visible) {
+          return await page.locator('#compileNoticeText').innerText();
+        }
+        return await page.locator('#horseCompileNoticeText').innerText();
+      });
+    expect(noticeText).toContain('5) Tikras C# kompiliatorius');
+    expect(noticeText).toContain('6) Tikro C# kompiliatoriaus užklausos detalės');
+    expect(noticeText).toContain('Užklausa (siųstas turinys):');
+    expect(noticeText).toContain('Atsakymas (gautas turinys):');
 
     if (await railToggle.isVisible()) {
       await railToggle.click();
