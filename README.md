@@ -376,8 +376,38 @@ npm run preview
 
 Workflow failai:
 
-- `.github/workflows/deploy-pages.yml` - build/deploy į GitHub Pages
+- `.github/workflows/deploy-pages.yml` - build/deploy į GitHub Pages (`gh-pages` šaką)
 - `.github/workflows/e2e.yml` - atskiras E2E pipeline
+
+Gyvi URL:
+
+- Produkcija (`main`): `https://bitkojine.github.io/nida2026bday/`
+- Šios darbo šakos preview: `https://bitkojine.github.io/nida2026bday/codex/pr-all-current-changes-2026-02-16/`
+
+Feature branch preview mechanizmas:
+
+- Trigger šakos:
+  - `main`
+  - `feature/**`
+  - `codex/**`
+- Deploy taikiniai (vienoje `gh-pages` šakoje):
+  - `main` -> `gh-pages` šakninis katalogas (`/`)
+  - `feature/*` arba `codex/*` -> atitinkamas subkatalogas (`/<branch-name>/`)
+- URL formatas:
+  - `https://bitkojine.github.io/nida2026bday/<branch-name>/`
+
+Svarbu GitHub Pages nustatymuose:
+
+- `Settings -> Pages -> Build and deployment`
+- `Source`: `Deploy from a branch`
+- `Branch`: `gh-pages`
+- `Folder`: `/(root)`
+
+Kaip tai veikia praktiškai:
+
+1. Push į `main` atnaujina produkciją (`/nida2026bday/`).
+2. Push į `feature/**` ar `codex/**` sukuria/atnaujina preview URL subkataloge.
+3. Produkcija ir preview egzistuoja kartu, be merge į `main`.
 
 Papildomas backend (tikram C# kompiliatoriui):
 
@@ -395,9 +425,9 @@ Render diegimo žingsniai:
 
 Deploy eiga:
 
-1. Push į `main`
-2. Generuojamas statinis build (`dist/`)
-3. Artifact publikuojamas per GitHub Pages
+1. Push į palaikomą šaką (`main`, `feature/**` arba `codex/**`)
+2. Generuojamas statinis build (`dist/`) su atitinkamu `base` keliu
+3. Turinis publikuojamas į `gh-pages` (root arba branch subkatalogą)
 
 ## Projekto struktūra
 
