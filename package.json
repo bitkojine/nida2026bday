@@ -12,7 +12,7 @@
     "test:fast": "vitest run",
     "test:watch": "vitest",
     "test:e2e": "env -u NO_COLOR playwright test",
-    "check:smoke-mobile": "npm run test:e2e -- --project=iphone-15-pro --grep=@smoke30 --max-failures=1",
+    "check:smoke-mobile": "PLAYWRIGHT_WEB_SERVER_COMMAND='npm run preview -- --host 127.0.0.1 --port 4173' npm run test:e2e -- --project=iphone-15-pro --grep=@smoke30 --max-failures=1",
     "test:all": "npm run typecheck && npm run test && npm run test:e2e",
     "check": "npm run lint && npm run typecheck && npm run test",
     "lint": "eslint .",
@@ -27,7 +27,7 @@
     "check:tracked-file-sizes": "tsx ./scripts/check-tracked-file-sizes.mts",
     "check:source-hygiene": "tsx ./scripts/check-source-hygiene.mts",
     "check:repo-hygiene": "tsx ./scripts/check-repo-hygiene.mts",
-    "check:30s": "npm run lint && npm run typecheck && npm run test:fast && npm run test && npm run build && npm run check:bundle-size && npm run check:dist-integrity && npm run check:localstorage-keys && npm run check:mission-template-contract && npm run check:smoke-mobile"
+    "check:30s": "npm run lint && npm run format:check && npm run typecheck && npm run test:fast && npm run check:localstorage-keys && npm run check:mission-template-contract && npm run build && npm run check:smoke-mobile"
   },
   "dependencies": {
     "@monaco-editor/loader": "^1.7.0",

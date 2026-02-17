@@ -15,6 +15,7 @@ Mobile-first ritmo žaidimas su gyvu C# taisyklių redagavimu naršyklėje.
 - [Šablonai](#šablonai)
 - [Išsaugojimas localStorage](#išsaugojimas-localstorage)
 - [Poraštė ir diagnostika](#poraštė-ir-diagnostika)
+- [30 sekundžių patikros biudžetas](#30-sekundžių-patikros-biudžetas)
 - [Testavimas](#testavimas)
 - [Skriptai](#skriptai)
 - [Deploy](#deploy)
@@ -136,7 +137,6 @@ Naudojami raktai:
   - apytikslis užimtumas
   - naršyklės `storage estimate` jei prieinama
   - visų mūsų raktų reikšmės; C# kodo raktui rodoma tik eilučių skaičiaus santrauka
-- `Pavojinga zona` su dviem atstatymo režimais:
 - `Pavojinga zona` su trimis veiksmais:
   - pilnas žaidimo reset (`yes reset`) + puslapio perkrovimas
   - tik C# kodo reset (`reset code`)
@@ -147,6 +147,54 @@ Naudojami raktai:
 - statistika turi fiksuotą eilučių struktūrą nuo pirmo renderio
 - kol duomenys ruošiami, rodomi aiškūs `tikrinama...` placeholder elementai
 - dėl to turinys „nešokinėja“ tarp eilučių skaičiaus
+
+## 30 sekundžių patikros biudžetas
+
+Greitam kasdieniam darbui naudojame vieną komandą:
+
+```bash
+npm run check:30s
+```
+
+Tikslas:
+
+- išlaikyti grįžtamąjį ryšį maždaug iki 30 s
+- anksti pagauti realias regresijas (logika, build, iPhone kritinis srautas)
+- pilnus, lėtesnius rinkinius palikti nightly/atskiriems CI workflow
+
+Kas įeina į `check:30s`:
+
+- `npm run lint` - gaudo kokybės ir potencialių bugų signalus statinėje analizėje
+- `npm run format:check` - užtikrina vienodą formatą ir sumažina triukšmą diff'uose
+- `npm run typecheck` - pagauna tipų kontraktų lūžius prieš runtime
+- `npm run test:fast` - greitas unit scenarijų tinklas kritinei logikai
+- `npm run check:localstorage-keys` - saugo localStorage raktų kontraktą nuo netyčinių lūžių
+- `npm run check:mission-template-contract` - tikrina misijų ir šablonų suderinamumą
+- `npm run build` - garantuoja, kad tikrinamas naujausias produkcinis build iš dabartinio kodo
+- `npm run check:smoke-mobile` - iPhone WebKit smoke (`@smoke30`) per `vite preview`, t. y. testuojamas ką tik sugeneruotas `dist`
+
+`check:30s` vykdymo tvarka (1:1):
+
+1. `npm run lint`
+2. `npm run format:check`
+3. `npm run typecheck`
+4. `npm run test:fast`
+5. `npm run check:localstorage-keys`
+6. `npm run check:mission-template-contract`
+7. `npm run build`
+8. `npm run check:smoke-mobile`
+
+Dabartinis biudžeto panaudojimas:
+
+- paskutinis pilnas paleidimas: apie `15.7 s`
+- tai sudaro apie `52%` iš `30 s` biudžeto
+
+Kodėl tai laikome „high value“:
+
+- padengia didžiausią riziką šiame projekte: mobilų veikimą, progreso saugojimą ir C# redagavimo srautą
+- sugauna dažniausias regresijų klases dar prieš pilnus E2E
+- suteikia garantiją, kad 30s cikle tikrinamas ir naujausias build artefaktas, ne tik source būsena
+- leidžia greitai iteruoti (mobilus-first), nelaukiant ilgo pipeline
 
 ## Testavimas
 
@@ -184,6 +232,13 @@ Pagrindinės E2E aprėptys:
 - iPhone landscape/portrait ir desktop išdėstymo stabilumas
 - oro fono (mažo + didelio) renderio stabilumas ir ribiniai atvejai
 - compile-fail pranešimų elgsena (rodyti/slėpti, `?` išskleidimas)
+- greitų C# redagavimų (invalid -> valid) stabilumas, kad laimi paskutinis pakeitimas
+
+Greitas kasdienis vartai (apie 30 s):
+
+```bash
+npm run check:30s
+```
 
 ## Skriptai
 
@@ -192,10 +247,13 @@ npm run dev
 npm run typecheck
 npm run lint
 npm run format
+npm run format:check
 npm run test
 npm run test:watch
 npm run test:e2e
 npm run test:all
+npm run check:smoke-mobile
+npm run check:30s
 npm run check
 npm run build
 npm run preview

@@ -262,6 +262,56 @@ test.describe('Rhythm game flow', () => {
       .toBe(0.09);
   });
 
+  test('@smoke30 latest rapid C# edit wins after transient invalid input', async ({ page }) => {
+    await page.goto('/');
+    await expect(page.locator('#gameScreen')).toBeVisible();
+
+    await ensureCodeStudioOpen(page);
+    const fallback = page.locator('#fallbackCode');
+    await expect(fallback).toBeVisible();
+
+    await fallback.evaluate((node) => {
+      const textarea = node as HTMLTextAreaElement;
+      const base = textarea.value;
+      const invalid = base.replace('public int geriTaskai = 50;', 'public int geriTaskai = ;');
+      const final = base.replace(
+        'public float tobulasLangas = 0.05f;',
+        'public float tobulasLangas = 0.11f;',
+      );
+
+      const emit = (value: string) => {
+        textarea.value = value;
+        textarea.dispatchEvent(new Event('input', { bubbles: true }));
+      };
+
+      emit(invalid);
+      emit(final);
+    });
+
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.isCompileValid() ?? null);
+      })
+      .toBe(true);
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.getRules().tobulasLangas ?? null);
+      })
+      .toBe(0.11);
+    await expect
+      .poll(async () => {
+        return await page.evaluate(() => window.__rhythmTest?.readEditorSource() ?? '');
+      })
+      .toContain('public float tobulasLangas = 0.11f;');
+    await expect
+      .poll(async () => {
+        return await page.evaluate(
+          () => window.localStorage.getItem('nida2026bday:editorSource:v1') ?? '',
+        );
+      })
+      .toContain('public float tobulasLangas = 0.11f;');
+  });
+
   test('danger zone confirmation requires exact phrase and supports cancel', async ({ page }) => {
     await page.goto('/');
     await expect(page.locator('#gameScreen')).toBeVisible();

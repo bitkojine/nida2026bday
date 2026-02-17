@@ -31,7 +31,7 @@ import {
 } from './render/horseAnimator';
 import { CodeCompilerService } from './services/codeCompilerService';
 import { CSHARP_TEMPLATE } from './services/csharpTemplate';
-import { applyCompileResult, wireFallbackCompiler } from './ui/compileFeedback';
+import { createLatestCompileApplier, wireFallbackCompiler } from './ui/compileFeedback';
 import { CODE_PUZZLES, evaluatePuzzleProgress } from './ui/codePuzzles';
 import { applyDanceRuleTemplate, DANCE_RULE_TEMPLATES } from './ui/danceRuleTemplates';
 import { highlightCSharp } from './ui/fallbackSyntaxHighlighter';
@@ -2212,15 +2212,17 @@ async function initEditor(): Promise<void> {
     const editor = await mountMonacoEditor(editorHost, INITIAL_EDITOR_SOURCE);
     tryAutoSizeEditorPanelForInitialLoad();
 
+    const compileApplier = createLatestCompileApplier(compiler, {
+      setRules: (next) => {
+        setRules(next);
+      },
+      setCompileValidity: (isValid, result) => {
+        setCompileValidityState(isValid, result);
+      },
+    });
+
     const runCompile = (): void => {
-      applyCompileResult(editor.getValue(), compiler, {
-        setRules: (next) => {
-          setRules(next);
-        },
-        setCompileValidity: (isValid, result) => {
-          setCompileValidityState(isValid, result);
-        },
-      });
+      void compileApplier.apply(editor.getValue());
     };
 
     editor.onDidChangeModelContent(() => {
